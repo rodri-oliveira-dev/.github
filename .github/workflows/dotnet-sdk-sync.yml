@@ -70,7 +70,7 @@ jobs:
           {
             echo "# .NET SDK synchronization"
             echo
-            echo "Source: `$RELEASE_INDEX_URL`"
+            printf 'Source: `%s`\n' "$RELEASE_INDEX_URL"
             echo
             echo "| Repository | Result |"
             echo "| --- | --- |"
@@ -256,12 +256,12 @@ jobs:
               echo
               echo "### Policy"
               echo
-              echo "- Updates remain within the existing .NET `major.minor` channel."
+              echo '- Updates remain within the existing .NET `major.minor` channel.'
               echo "- Preview SDKs are ignored."
               echo "- Channels outside active/maintenance support are not upgraded automatically."
               echo "- Major/minor migrations require an explicit repository-level decision."
               echo
-              echo "Release metadata source: `$RELEASE_INDEX_URL`"
+              printf 'Release metadata source: `%s`\n' "$RELEASE_INDEX_URL"
             } > "$pr_body"
 
             pr_url="$(

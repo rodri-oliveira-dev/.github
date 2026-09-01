@@ -21,7 +21,7 @@ concurrency:
 
 jobs:
   sync:
-    name: Discover global.json and open update PRs
+    name: Discover root global.json and open update PRs
     runs-on: ubuntu-latest
 
     steps:
@@ -44,6 +44,7 @@ jobs:
 
           readonly RELEASE_INDEX_URL="https://dotnetcli.blob.core.windows.net/dotnet/release-metadata/releases-index.json"
           readonly UPDATE_BRANCH="chore/sync-dotnet-sdk"
+          readonly GLOBAL_JSON_PATH="global.json"
 
           release_index="$(mktemp)"
           repositories_file="$(mktemp)"
@@ -53,11 +54,49 @@ jobs:
           }
           trap cleanup EXIT
 
-          curl --fail --silent --show-error --location             "$RELEASE_INDEX_URL"             --output "$release_index"
+          log_result() {
+            local repo="$1"
+            local result="$2"
+            printf '| `%s` | %s |\n' "$repo" "$result" | tee -a "$GITHUB_STEP_SUMMARY"
+          }
+
+          write_header() {
+            {
+              echo "# .NET SDK synchronization"
+              echo
+              printf 'Source: `%s`\n' "$RELEASE_INDEX_URL"
+              echo
+              echo "| Repository | Result |"
+              echo "| --- | --- |"
+            } | tee -a "$GITHUB_STEP_SUMMARY"
+          }
+
+          write_summary() {
+            {
+              echo
+              echo "## Summary"
+              echo
+              echo "| Metric | Count |"
+              echo "| --- | ---: |"
+              echo "| Repositories scanned | $repositories_scanned |"
+              echo "| Repositories with root global.json | $repositories_with_global_json |"
+              echo "| Repositories already current / no automatic update | $repositories_current |"
+              echo "| Repositories with updates | $repositories_with_updates |"
+              echo "| Files requiring updates | $files_updated |"
+              echo "| Pull requests created | $pull_requests_created |"
+              echo "| Repositories skipped | $repositories_skipped |"
+            } | tee -a "$GITHUB_STEP_SUMMARY"
+          }
+
+          curl --fail --silent --show-error --location \
+            "$RELEASE_INDEX_URL" \
+            --output "$release_index"
 
           jq -e '.["releases-index"] | type == "array"' "$release_index" >/dev/null
 
-          gh api --paginate "/installation/repositories?per_page=100"             --jq '.repositories[] | [.full_name, .default_branch, (.archived | tostring), (.fork | tostring)] | @tsv'             > "$repositories_file"
+          gh api --paginate "/installation/repositories?per_page=100" \
+            --jq '.repositories[] | [.full_name, .default_branch, (.archived | tostring), (.fork | tostring)] | @tsv' \
+            > "$repositories_file"
 
           repositories_scanned=0
           repositories_with_global_json=0
@@ -67,14 +106,7 @@ jobs:
           repositories_skipped=0
           files_updated=0
 
-          {
-            echo "# .NET SDK synchronization"
-            echo
-            printf 'Source: `%s`\n' "$RELEASE_INDEX_URL"
-            echo
-            echo "| Repository | Result |"
-            echo "| --- | --- |"
-          } >> "$GITHUB_STEP_SUMMARY"
+          write_header
 
           while IFS=$'\t' read -r repo default_branch archived fork; do
             [[ -z "$repo" ]] && continue
@@ -82,162 +114,170 @@ jobs:
 
             if [[ "$archived" == "true" || "$fork" == "true" ]]; then
               repositories_skipped=$((repositories_skipped + 1))
-              printf '| `%s` | Skipped (archived or fork) |\n' "$repo" >> "$GITHUB_STEP_SUMMARY"
+              log_result "$repo" "Skipped (archived or fork)"
               continue
             fi
 
             repositories_scanned=$((repositories_scanned + 1))
 
-            default_sha="$(gh api "repos/$repo/branches/$default_branch" --jq '.commit.sha')"
-            tree_sha="$(gh api "repos/$repo/git/commits/$default_sha" --jq '.tree.sha')"
+            file_response_file="$(mktemp)"
 
-            global_json_paths="$(mktemp)"
-            updates_file="$(mktemp)"
-
-            gh api "repos/$repo/git/trees/$tree_sha?recursive=1"               --jq '.tree[]
-                | select(.type == "blob")
-                | select(.path == "global.json" or (.path | endswith("/global.json")))
-                | .path'               > "$global_json_paths"
-
-            if [[ ! -s "$global_json_paths" ]]; then
-              rm -f "$global_json_paths" "$updates_file"
-              printf '| `%s` | No global.json |\n' "$repo" >> "$GITHUB_STEP_SUMMARY"
-              continue
+            if ! http_status="$(
+              curl --silent --show-error --location \
+                --output "$file_response_file" \
+                --write-out "%{http_code}" \
+                --header "Accept: application/vnd.github+json" \
+                --header "Authorization: Bearer $GH_TOKEN" \
+                --header "X-GitHub-Api-Version: 2022-11-28" \
+                --get \
+                --data-urlencode "ref=$default_branch" \
+                "$GITHUB_API_URL/repos/$repo/contents/$GLOBAL_JSON_PATH"
+            )"; then
+              rm -f "$file_response_file"
+              echo "::error title=GitHub Contents API request failed::Unable to query $repo/$GLOBAL_JSON_PATH."
+              exit 1
             fi
+
+            case "$http_status" in
+              200)
+                file_response="$(cat "$file_response_file")"
+                rm -f "$file_response_file"
+                ;;
+              404)
+                rm -f "$file_response_file"
+                log_result "$repo" "No root global.json"
+                continue
+                ;;
+              *)
+                api_message="$(jq -r '.message // "Unknown GitHub API error"' "$file_response_file" 2>/dev/null || echo "Unknown GitHub API error")"
+                rm -f "$file_response_file"
+                echo "::error title=GitHub Contents API returned HTTP $http_status::$repo/$GLOBAL_JSON_PATH: $api_message"
+                exit 1
+                ;;
+            esac
 
             repositories_with_global_json=$((repositories_with_global_json + 1))
 
-            while IFS= read -r path; do
-              [[ -z "$path" ]] && continue
+            content="$(jq -r '.content' <<< "$file_response" | tr -d '\n' | base64 --decode)"
 
-              file_response="$(gh api "repos/$repo/contents/$path?ref=$default_branch")"
-              content="$(jq -r '.content' <<< "$file_response" | tr -d '\n' | base64 --decode)"
-
-              if ! jq -e . >/dev/null 2>&1 <<< "$content"; then
-                printf '%s\t%s\t%s\t%s\n' "$path" "INVALID_JSON" "-" "-" >> "$updates_file"
-                continue
-              fi
-
-              current="$(jq -r '.sdk.version // empty' <<< "$content")"
-
-              if [[ -z "$current" ]]; then
-                printf '%s\t%s\t%s\t%s\n' "$path" "NO_SDK_VERSION" "-" "-" >> "$updates_file"
-                continue
-              fi
-
-              # Preview SDKs are intentionally not managed by this workflow.
-              if [[ "$current" == *-* ]]; then
-                printf '%s\t%s\t%s\t%s\n' "$path" "PREVIEW" "$current" "-" >> "$updates_file"
-                continue
-              fi
-
-              channel="$(awk -F. '{ print $1 "." $2 }' <<< "$current")"
-
-              metadata="$(
-                jq -r --arg channel "$channel" '
-                  .["releases-index"][]
-                  | select(.["channel-version"] == $channel)
-                  | select(
-                      .["support-phase"] == "active"
-                      or .["support-phase"] == "maintenance"
-                    )
-                  | [
-                      .["latest-sdk"],
-                      .["release-type"],
-                      .["support-phase"]
-                    ]
-                  | @tsv
-                ' "$release_index" | head -n 1
-              )"
-
-              if [[ -z "$metadata" ]]; then
-                printf '%s\t%s\t%s\t%s\n' "$path" "UNSUPPORTED_CHANNEL" "$current" "-" >> "$updates_file"
-                continue
-              fi
-
-              IFS=$'\t' read -r latest release_type support_phase <<< "$metadata"
-
-              if [[ -z "$latest" || "$latest" == *-* ]]; then
-                printf '%s\t%s\t%s\t%s\n' "$path" "NO_STABLE_SDK" "$current" "-" >> "$updates_file"
-                continue
-              fi
-
-              if [[ "$current" == "$latest" ]]; then
-                printf '%s\t%s\t%s\t%s\n' "$path" "CURRENT" "$current" "$latest" >> "$updates_file"
-                continue
-              fi
-
-              highest="$(printf '%s\n%s\n' "$current" "$latest" | sort -V | tail -n 1)"
-              if [[ "$highest" == "$current" ]]; then
-                printf '%s\t%s\t%s\t%s\n' "$path" "CURRENT_OR_NEWER" "$current" "$latest" >> "$updates_file"
-                continue
-              fi
-
-              printf '%s\t%s\t%s\t%s\n' "$path" "UPDATE" "$current" "$latest" >> "$updates_file"
-            done < "$global_json_paths"
-
-            update_count="$(awk -F'\t' '$2 == "UPDATE" { count++ } END { print count + 0 }' "$updates_file")"
-
-            if [[ "$update_count" -eq 0 ]]; then
+            if ! jq -e . >/dev/null 2>&1 <<< "$content"; then
               repositories_current=$((repositories_current + 1))
+              log_result "$repo" "No update (invalid root global.json)"
+              continue
+            fi
 
-              status="$(
-                awk -F'\t' '
-                  $2 == "UNSUPPORTED_CHANNEL" { unsupported = 1 }
-                  $2 == "PREVIEW" { preview = 1 }
-                  $2 == "INVALID_JSON" { invalid = 1 }
-                  END {
-                    if (invalid) print "No update (invalid global.json)"
-                    else if (unsupported) print "No update (unsupported channel)"
-                    else if (preview) print "No update (preview SDK)"
-                    else print "Current"
-                  }
-                ' "$updates_file"
-              )"
+            current="$(jq -r '.sdk.version // empty' <<< "$content")"
 
-              printf '| `%s` | %s |\n' "$repo" "$status" >> "$GITHUB_STEP_SUMMARY"
-              rm -f "$global_json_paths" "$updates_file"
+            if [[ -z "$current" ]]; then
+              repositories_current=$((repositories_current + 1))
+              log_result "$repo" "No update (sdk.version missing)"
+              continue
+            fi
+
+            if [[ "$current" == *-* ]]; then
+              repositories_current=$((repositories_current + 1))
+              log_result "$repo" "No update (preview SDK: $current)"
+              continue
+            fi
+
+            channel="$(awk -F. '{ print $1 "." $2 }' <<< "$current")"
+
+            metadata="$(
+              jq -r --arg channel "$channel" '
+                .["releases-index"][]
+                | select(.["channel-version"] == $channel)
+                | select(
+                    .["support-phase"] == "active"
+                    or .["support-phase"] == "maintenance"
+                  )
+                | [
+                    .["latest-sdk"],
+                    .["release-type"],
+                    .["support-phase"]
+                  ]
+                | @tsv
+              ' "$release_index" | head -n 1
+            )"
+
+            if [[ -z "$metadata" ]]; then
+              repositories_current=$((repositories_current + 1))
+              log_result "$repo" "No update (unsupported channel $channel; current $current)"
+              continue
+            fi
+
+            IFS=$'\t' read -r latest release_type support_phase <<< "$metadata"
+
+            if [[ -z "$latest" || "$latest" == *-* ]]; then
+              repositories_current=$((repositories_current + 1))
+              log_result "$repo" "No update (no stable SDK found for $channel)"
+              continue
+            fi
+
+            if [[ "$current" == "$latest" ]]; then
+              repositories_current=$((repositories_current + 1))
+              log_result "$repo" "Current ($current)"
+              continue
+            fi
+
+            highest="$(printf '%s\n%s\n' "$current" "$latest" | sort -V | tail -n 1)"
+            if [[ "$highest" == "$current" ]]; then
+              repositories_current=$((repositories_current + 1))
+              log_result "$repo" "Current/newer than metadata ($current; metadata $latest)"
               continue
             fi
 
             repositories_with_updates=$((repositories_with_updates + 1))
-            files_updated=$((files_updated + update_count))
+            files_updated=$((files_updated + 1))
 
             if [[ "$DRY_RUN" == "true" ]]; then
-              details="$(awk -F'\t' '$2 == "UPDATE" { printf "%s: %s → %s; ", $1, $3, $4 }' "$updates_file")"
-              printf '| `%s` | Dry run — %s |\n' "$repo" "$details" >> "$GITHUB_STEP_SUMMARY"
-              rm -f "$global_json_paths" "$updates_file"
+              log_result "$repo" "Dry run — $GLOBAL_JSON_PATH: $current → $latest ($release_type, $support_phase)"
               continue
             fi
 
             existing_pr="$(
-              gh pr list                 --repo "$repo"                 --state open                 --head "$UPDATE_BRANCH"                 --json number                 --jq '.[0].number // empty'
+              gh pr list \
+                --repo "$repo" \
+                --state open \
+                --head "$UPDATE_BRANCH" \
+                --json number \
+                --jq '.[0].number // empty'
             )"
 
             if [[ -n "$existing_pr" ]]; then
-              printf '| `%s` | Update available; PR #%s already open |\n' "$repo" "$existing_pr" >> "$GITHUB_STEP_SUMMARY"
-              rm -f "$global_json_paths" "$updates_file"
+              log_result "$repo" "Update available ($current → $latest); PR #$existing_pr already open"
               continue
             fi
 
-            # Remove only the workflow-owned branch when it is stale and has no open PR.
+            default_sha="$(gh api "repos/$repo/branches/$default_branch" --jq '.commit.sha')"
+
             if gh api "repos/$repo/git/ref/heads/$UPDATE_BRANCH" >/dev/null 2>&1; then
-              gh api                 --method DELETE                 "repos/$repo/git/refs/heads/$UPDATE_BRANCH"                 >/dev/null
+              gh api \
+                --method DELETE \
+                "repos/$repo/git/refs/heads/$UPDATE_BRANCH" \
+                >/dev/null
             fi
 
-            gh api               --method POST               "repos/$repo/git/refs"               -f ref="refs/heads/$UPDATE_BRANCH"               -f sha="$default_sha"               >/dev/null
+            gh api \
+              --method POST \
+              "repos/$repo/git/refs" \
+              -f ref="refs/heads/$UPDATE_BRANCH" \
+              -f sha="$default_sha" \
+              >/dev/null
 
-            while IFS=$'\t' read -r path status current latest; do
-              [[ "$status" != "UPDATE" ]] && continue
+            branch_file_response="$(gh api "repos/$repo/contents/$GLOBAL_JSON_PATH?ref=$UPDATE_BRANCH")"
+            file_sha="$(jq -r '.sha' <<< "$branch_file_response")"
+            branch_content="$(jq -r '.content' <<< "$branch_file_response" | tr -d '\n' | base64 --decode)"
+            updated_content="$(jq --arg version "$latest" '.sdk.version = $version' <<< "$branch_content")"
+            encoded_content="$(printf '%s\n' "$updated_content" | base64 --wrap=0)"
 
-              branch_file_response="$(gh api "repos/$repo/contents/$path?ref=$UPDATE_BRANCH")"
-              file_sha="$(jq -r '.sha' <<< "$branch_file_response")"
-              branch_content="$(jq -r '.content' <<< "$branch_file_response" | tr -d '\n' | base64 --decode)"
-              updated_content="$(jq --arg version "$latest" '.sdk.version = $version' <<< "$branch_content")"
-              encoded_content="$(printf '%s\n' "$updated_content" | base64 --wrap=0)"
-
-              gh api                 --method PUT                 "repos/$repo/contents/$path"                 -f message="chore: update .NET SDK from $current to $latest"                 -f content="$encoded_content"                 -f sha="$file_sha"                 -f branch="$UPDATE_BRANCH"                 >/dev/null
-            done < "$updates_file"
+            gh api \
+              --method PUT \
+              "repos/$repo/contents/$GLOBAL_JSON_PATH" \
+              -f message="chore: update .NET SDK from $current to $latest" \
+              -f content="$encoded_content" \
+              -f sha="$file_sha" \
+              -f branch="$UPDATE_BRANCH" \
+              >/dev/null
 
             pr_body="$(mktemp)"
             {
@@ -247,15 +287,11 @@ jobs:
               echo
               echo "| File | Current SDK | Latest supported SDK |"
               echo "| --- | ---: | ---: |"
-
-              while IFS=$'\t' read -r path status current latest; do
-                [[ "$status" != "UPDATE" ]] && continue
-                printf '| `%s` | `%s` | `%s` |\n' "$path" "$current" "$latest"
-              done < "$updates_file"
-
+              printf '| `%s` | `%s` | `%s` |\n' "$GLOBAL_JSON_PATH" "$current" "$latest"
               echo
               echo "### Policy"
               echo
+              echo '- Only the repository-root `global.json` is managed.'
               echo '- Updates remain within the existing .NET `major.minor` channel.'
               echo "- Preview SDKs are ignored."
               echo "- Channels outside active/maintenance support are not upgraded automatically."
@@ -265,26 +301,18 @@ jobs:
             } > "$pr_body"
 
             pr_url="$(
-              gh pr create                 --repo "$repo"                 --base "$default_branch"                 --head "$UPDATE_BRANCH"                 --title "chore: update .NET SDK"                 --body-file "$pr_body"
+              gh pr create \
+                --repo "$repo" \
+                --base "$default_branch" \
+                --head "$UPDATE_BRANCH" \
+                --title "chore: update .NET SDK from $current to $latest" \
+                --body-file "$pr_body"
             )"
 
-            pull_requests_created=$((pull_requests_created + 1))
-            printf '| `%s` | PR created: %s |\n' "$repo" "$pr_url" >> "$GITHUB_STEP_SUMMARY"
+            rm -f "$pr_body"
 
-            rm -f "$pr_body" "$global_json_paths" "$updates_file"
+            pull_requests_created=$((pull_requests_created + 1))
+            log_result "$repo" "PR created: $pr_url ($current → $latest)"
           done < "$repositories_file"
 
-          {
-            echo
-            echo "## Summary"
-            echo
-            echo "| Metric | Count |"
-            echo "| --- | ---: |"
-            echo "| Repositories scanned | $repositories_scanned |"
-            echo "| Repositories with global.json | $repositories_with_global_json |"
-            echo "| Repositories already current / no automatic update | $repositories_current |"
-            echo "| Repositories with updates | $repositories_with_updates |"
-            echo "| Files requiring updates | $files_updated |"
-            echo "| Pull requests created | $pull_requests_created |"
-            echo "| Repositories skipped | $repositories_skipped |"
-          } >> "$GITHUB_STEP_SUMMARY"
+          write_summary

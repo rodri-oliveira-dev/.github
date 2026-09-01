@@ -1,9 +1,6 @@
 name: Sync .NET SDK versions
 
 on:
-  push:
-    branches:
-      - feat/dotnet-sdk-sync-workflow
   schedule:
     # 09:00 America/Sao_Paulo (12:00 UTC), every Monday.
     - cron: "0 12 * * 1"
@@ -41,7 +38,7 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           OWNER: ${{ github.repository_owner }}
-          DRY_RUN: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.dry_run) }}
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || false }}
         run: |
           set -Eeuo pipefail
 

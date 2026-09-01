@@ -1,101 +1,101 @@
 # .github
 
-Shared community health files and contribution guidelines for repositories maintained under the `rodri-oliveira-dev` account.
+[![Sync .NET SDK versions](https://github.com/rodri-oliveira-dev/.github/actions/workflows/dotnet-sdk-sync.yml/badge.svg)](https://github.com/rodri-oliveira-dev/.github/actions/workflows/dotnet-sdk-sync.yml)
 
-This repository centralizes default documentation and community standards that can be inherited by public repositories when they do not provide their own repository-specific version.
+Central repository for shared community standards and maintenance automation across repositories maintained under the `rodri-oliveira-dev` account.
 
-## English
+> 🇧🇷 [Leia em Português](README.pt-BR.md)
 
-### Purpose
+## Purpose
 
-The goal of this repository is to keep contribution, security, and community guidelines consistent across my open-source projects while avoiding unnecessary duplication.
+This repository provides a consistent baseline for contribution, security, funding, and selected repository-maintenance policies without duplicating the same configuration across multiple projects.
 
-Repository-specific files always take precedence when a project requires different rules or workflows.
+Repository-specific files always take precedence when a project needs different rules, workflows, compatibility requirements, or support policies.
 
-### Current files
+## What is centralized here
 
-- [CONTRIBUTING.md](CONTRIBUTING.md) — default contribution guidelines, development workflow, Pull Request expectations, code-quality principles, and .NET validation guidance.
-- [SECURITY.md](SECURITY.md) — default security policy, responsible vulnerability reporting, disclosure expectations, and scope.
-- [.github/FUNDING.yml](.github/FUNDING.yml) — GitHub Sponsors configuration.
+| File / workflow | Purpose |
+| --- | --- |
+| [`CONTRIBUTING.md`](CONTRIBUTING.md) | Default contribution guidelines, development workflow, Pull Request expectations, code-quality principles, and common .NET validation guidance. |
+| [`SECURITY.md`](SECURITY.md) | Default security policy, responsible vulnerability reporting, disclosure expectations, and scope. |
+| [`.github/FUNDING.yml`](.github/FUNDING.yml) | GitHub Sponsors configuration. |
+| [`.github/workflows/dotnet-sdk-sync.yml`](.github/workflows/dotnet-sdk-sync.yml) | Central automation that checks repository-root `global.json` files and opens SDK update Pull Requests when appropriate. |
 
-### How GitHub uses this repository
+## How GitHub uses this repository
 
 GitHub supports default community health files through a public repository named `.github`.
 
-When one of my public repositories does not contain its own supported community health file, GitHub can use the corresponding default file from this repository.
+When one of my public repositories does not define its own supported community health file, GitHub can use the corresponding default file from this repository.
 
-This makes it possible to maintain a consistent baseline while still allowing each project to define its own requirements when necessary.
+A repository-local file remains authoritative for that project. This allows shared defaults to coexist with project-specific requirements.
 
-### Repository-specific rules
+Examples of repository-specific overrides include:
 
-The contents of this repository are intended as defaults.
+- contribution workflows;
+- security support policies;
+- issue and Pull Request templates;
+- support policies;
+- codes of conduct;
+- build, testing, release, or compatibility requirements.
 
-If another repository contains its own version of a supported file, that local version should be considered authoritative for that project.
+## Central .NET SDK synchronization
 
-For example, a repository may define its own:
+The [`dotnet-sdk-sync.yml`](.github/workflows/dotnet-sdk-sync.yml) workflow provides centralized SDK maintenance for repositories accessible to the configured GitHub App.
 
-- contribution workflow;
-- security support policy;
-- issue templates;
-- Pull Request template;
-- support policy;
-- code of conduct.
+Its current policy is intentionally conservative:
 
-### Open-source projects
+- checks only the repository-root `global.json`;
+- ignores archived repositories and forks;
+- ignores preview SDKs;
+- keeps updates within the existing `major.minor` channel;
+- considers only supported .NET channels in active or maintenance phase;
+- uses official Microsoft .NET release metadata;
+- opens a Pull Request instead of changing the default branch directly;
+- does not auto-merge generated Pull Requests;
+- supports a manual `dry_run` mode before applying changes.
 
-These defaults are intended to support the repositories and packages I maintain, especially projects in the .NET ecosystem.
+The scheduled run executes every Monday at 09:00 in `America/Sao_Paulo` (12:00 UTC).
 
-Each repository may still define additional build, testing, package, architecture, CI/CD, compatibility, or release requirements.
+This workflow is maintenance automation, not a default community-health file inherited automatically by other repositories. It actively evaluates repositories through the GitHub App installation and creates repository-level Pull Requests when an eligible SDK update exists.
 
-Always review the target repository's README, contribution instructions, and workflows before submitting a change.
+## Repository structure
 
----
+```text
+.
+├── .github/
+│   ├── FUNDING.yml
+│   └── workflows/
+│       └── dotnet-sdk-sync.yml
+├── CONTRIBUTING.md
+├── SECURITY.md
+├── README.md
+└── README.pt-BR.md
+```
 
-## Português
+## Design principles
 
-Arquivos compartilhados de comunidade, segurança e contribuição para os repositórios mantidos na conta `rodri-oliveira-dev`.
+This repository follows a few simple governance principles:
 
-Este repositório centraliza documentação e padrões que podem ser utilizados como configuração padrão pelos meus repositórios públicos quando eles não possuem uma versão específica própria.
+- **shared defaults, local authority** — repository-specific configuration wins when present;
+- **least privilege** — cross-repository automation uses a GitHub App with scoped permissions;
+- **review before change** — maintenance automation opens Pull Requests instead of merging directly;
+- **safe defaults** — version-management automation avoids implicit major/minor migrations;
+- **observable automation** — workflow results are exposed through GitHub Actions logs and summaries.
 
-### Objetivo
+## Contributing
 
-O objetivo deste repositório é manter as orientações de contribuição, segurança e comunidade consistentes entre meus projetos open source, evitando a duplicação desnecessária dos mesmos arquivos em diversos repositórios.
+Before submitting a change, review [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
-Quando um projeto precisar de regras ou fluxos diferentes, os arquivos específicos daquele repositório terão prioridade.
+Changes to shared defaults should remain broadly applicable. Repository-specific behavior generally belongs in the target repository instead of here.
 
-### Arquivos atuais
+## Security
 
-- [CONTRIBUTING.md](CONTRIBUTING.md) — orientações padrão para contribuição, fluxo de desenvolvimento, expectativas para Pull Requests, princípios de qualidade de código e validações comuns em projetos .NET.
-- [SECURITY.md](SECURITY.md) — política padrão de segurança, reporte responsável de vulnerabilidades, expectativas de divulgação e escopo.
-- [.github/FUNDING.yml](.github/FUNDING.yml) — configuração do GitHub Sponsors.
+For vulnerability reporting and disclosure expectations, see [`SECURITY.md`](SECURITY.md).
 
-### Como o GitHub utiliza este repositório
+Do not report sensitive security issues through public GitHub issues.
 
-O GitHub permite definir arquivos padrão de comunidade através de um repositório público chamado `.github`.
+## Scope
 
-Quando um dos meus repositórios públicos não possuir seu próprio arquivo de comunidade suportado, o GitHub poderá utilizar o arquivo correspondente definido aqui.
+These defaults primarily support the open-source repositories and packages I maintain, with particular emphasis on the .NET ecosystem.
 
-Isso permite manter uma base consistente entre os projetos sem impedir que cada repositório possua regras próprias quando necessário.
-
-### Regras específicas de cada repositório
-
-O conteúdo deste repositório deve ser tratado como padrão.
-
-Caso outro repositório possua sua própria versão de um arquivo suportado, a versão local deverá ser considerada a referência para aquele projeto.
-
-Por exemplo, um repositório poderá definir seus próprios:
-
-- fluxo de contribuição;
-- política de suporte de segurança;
-- templates de issues;
-- template de Pull Request;
-- política de suporte;
-- código de conduta.
-
-### Projetos open source
-
-Esses padrões foram definidos para apoiar os repositórios e pacotes que mantenho, especialmente projetos do ecossistema .NET.
-
-Cada repositório ainda poderá possuir requisitos adicionais relacionados a build, testes, empacotamento, arquitetura, CI/CD, compatibilidade ou releases.
-
-Antes de contribuir, consulte sempre o README, as instruções de contribuição e os workflows do repositório de destino.
+Individual repositories may define additional architecture, CI/CD, testing, packaging, compatibility, release, or operational requirements.

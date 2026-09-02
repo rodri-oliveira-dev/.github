@@ -1,6 +1,7 @@
 # .github
 
 [![Sincronizar versões do .NET SDK](https://github.com/rodri-oliveira-dev/.github/actions/workflows/dotnet-sdk-sync.yml/badge.svg)](https://github.com/rodri-oliveira-dev/.github/actions/workflows/dotnet-sdk-sync.yml)
+[![Inventariar repositórios .NET](https://github.com/rodri-oliveira-dev/.github/actions/workflows/dotnet-repository-inventory.yml/badge.svg)](https://github.com/rodri-oliveira-dev/.github/actions/workflows/dotnet-repository-inventory.yml)
 
 Repositório central para padrões compartilhados de comunidade e automações de manutenção dos repositórios mantidos na conta `rodri-oliveira-dev`.
 
@@ -16,10 +17,14 @@ Arquivos específicos de cada repositório sempre têm prioridade quando um proj
 
 | Arquivo / workflow | Finalidade |
 | --- | --- |
+| [`.gitattributes`](.gitattributes) | Normalização local de quebras de linha e diff para documentação, JSON e workflows do GitHub Actions. |
+| [`.gitignore`](.gitignore) | Regras locais de ignore para artifacts gerados, arquivos temporários de validação, checkouts locais de ferramentas e arquivos de editor/SO. |
+| [`.github.code-workspace`](.github.code-workspace) | Configurações de workspace do VS Code e recomendações de extensões para edição consistente de Markdown, YAML e GitHub Actions. |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | Diretrizes padrão para contribuição, fluxo de desenvolvimento, expectativas para Pull Requests, princípios de qualidade de código e orientações comuns de validação em .NET. |
 | [`SECURITY.md`](SECURITY.md) | Política padrão de segurança, reporte responsável de vulnerabilidades, expectativas de divulgação e escopo. |
 | [`.github/FUNDING.yml`](.github/FUNDING.yml) | Configuração do GitHub Sponsors. |
 | [`.github/workflows/dotnet-sdk-sync.yml`](.github/workflows/dotnet-sdk-sync.yml) | Automação central que verifica arquivos `global.json` na raiz dos repositórios e abre Pull Requests de atualização do SDK quando aplicável. |
+| [`.github/workflows/dotnet-repository-inventory.yml`](.github/workflows/dotnet-repository-inventory.yml) | Automação central somente leitura que inventaria projetos .NET nos repositórios acessíveis à GitHub App configurada. |
 
 ## Como o GitHub utiliza este repositório
 
@@ -38,7 +43,9 @@ Exemplos de regras que podem ser sobrescritas localmente:
 - código de conduta;
 - requisitos de build, testes, release ou compatibilidade.
 
-## Sincronização central do .NET SDK
+## Automações centrais de .NET
+
+### Sincronização central do .NET SDK
 
 O workflow [`dotnet-sdk-sync.yml`](.github/workflows/dotnet-sdk-sync.yml) fornece manutenção centralizada de SDK para os repositórios acessíveis à GitHub App configurada.
 
@@ -58,14 +65,48 @@ A execução agendada ocorre toda segunda-feira às 09:00 em `America/Sao_Paulo`
 
 Esse workflow é uma automação de manutenção e não um arquivo de comunidade herdado automaticamente pelos demais repositórios. Ele consulta ativamente os repositórios através da instalação da GitHub App e cria Pull Requests individuais quando encontra uma atualização elegível do SDK.
 
+### Inventário central de repositórios .NET
+
+O workflow [`dotnet-repository-inventory.yml`](.github/workflows/dotnet-repository-inventory.yml) gera um inventário consolidado, somente leitura, dos projetos .NET existentes nos repositórios acessíveis à GitHub App configurada.
+
+Ele usa [`rodri-oliveira-dev/DotNetRepoInspector`](https://github.com/rodri-oliveira-dev/DotNetRepoInspector) como fonte de verdade para inspeção dos projetos. A classificação é baseada em metadados MSBuild efetivos obtidos pelo Inspector, não em heurísticas Bash nem parsing direto de `.csproj`.
+
+O inventário identifica estes tipos de projeto:
+
+- `web`;
+- `worker`;
+- `console`;
+- `library`;
+- `test`;
+- `unknown`.
+
+O workflow mantém Target Framework e .NET SDK como conceitos separados. Um Target Framework como `net10.0` descreve o alvo de compilação/execução do projeto, enquanto um SDK configurado ou resolvido como `10.0.100` descreve o SDK usado pela avaliação/build tooling do repositório.
+
+O inventário pode ser executado manualmente por `workflow_dispatch` e também roda semanalmente às quartas-feiras, às 09:30 em `America/Sao_Paulo` (12:30 UTC), sem sobrepor o agendamento de segunda-feira da sincronização de SDK. A configuração de concorrência impede execuções simultâneas do inventário.
+
+O GitHub Actions Summary é o relatório visual principal. Ele mostra uma tabela Markdown com uma linha por `.csproj`, incluindo repositório, caminho do projeto, tipo, Target Framework e SDK, seguida por contagens de repositórios verificados, repositórios com e sem projetos .NET, total de projetos, totais por classificação e warnings/erros de inspeção.
+
+O workflow também exporta:
+
+- `artifacts/dotnet-repository-inventory.csv`;
+- `artifacts/dotnet-repository-inventory.json`.
+
+Os dois arquivos são enviados como artifact `dotnet-repository-inventory` com `retention-days: 3`, permanecendo disponíveis para download na execução do workflow por 3 dias.
+
+Repositórios sem arquivos `.csproj` são contabilizados e não fazem a execução falhar. Problemas de clone ou inspeção em repositórios individuais são registrados como warnings/status, e o relatório consolidado continua sendo produzido. O workflow reutiliza as credenciais existentes da GitHub App, solicita apenas permissões de leitura no GitHub Actions, ignora forks e repositórios arquivados, inspeciona somente a branch padrão, remove diretórios temporários de cada repositório após a inspeção e não escreve nos repositórios analisados.
+
 ## Estrutura do repositório
 
 ```text
 .
+├── .gitattributes
 ├── .github/
 │   ├── FUNDING.yml
 │   └── workflows/
+│       ├── dotnet-repository-inventory.yml
 │       └── dotnet-sdk-sync.yml
+├── .github.code-workspace
+├── .gitignore
 ├── CONTRIBUTING.md
 ├── SECURITY.md
 ├── README.md
@@ -80,7 +121,7 @@ Este repositório segue alguns princípios simples:
 - **menor privilégio** — automações entre repositórios usam uma GitHub App com permissões restritas;
 - **revisão antes da alteração** — automações de manutenção abrem Pull Requests em vez de fazer merge direto;
 - **padrões seguros** — a automação de versões não realiza migrações implícitas de major/minor;
-- **automação observável** — os resultados dos workflows são registrados nos logs e summaries do GitHub Actions.
+- **automação observável** — os resultados dos workflows são registrados nos logs, summaries e artifacts de curta duração quando dados estruturados são úteis.
 
 ## Contribuição
 

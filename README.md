@@ -1,6 +1,7 @@
 # .github
 
 [![Sync .NET SDK versions](https://github.com/rodri-oliveira-dev/.github/actions/workflows/dotnet-sdk-sync.yml/badge.svg)](https://github.com/rodri-oliveira-dev/.github/actions/workflows/dotnet-sdk-sync.yml)
+[![Inventory .NET repositories](https://github.com/rodri-oliveira-dev/.github/actions/workflows/dotnet-repository-inventory.yml/badge.svg)](https://github.com/rodri-oliveira-dev/.github/actions/workflows/dotnet-repository-inventory.yml)
 
 Central repository for shared community standards and maintenance automation across repositories maintained under the `rodri-oliveira-dev` account.
 
@@ -16,10 +17,14 @@ Repository-specific files always take precedence when a project needs different 
 
 | File / workflow | Purpose |
 | --- | --- |
+| [`.gitattributes`](.gitattributes) | Repository-local line-ending and diff normalization for documentation, JSON, and GitHub Actions workflow files. |
+| [`.gitignore`](.gitignore) | Repository-local ignore rules for generated artifacts, temporary validation files, local tool checkouts, and editor/OS files. |
+| [`.github.code-workspace`](.github.code-workspace) | VS Code workspace settings and extension recommendations for consistent Markdown, YAML, and GitHub Actions editing. |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | Default contribution guidelines, development workflow, Pull Request expectations, code-quality principles, and common .NET validation guidance. |
 | [`SECURITY.md`](SECURITY.md) | Default security policy, responsible vulnerability reporting, disclosure expectations, and scope. |
 | [`.github/FUNDING.yml`](.github/FUNDING.yml) | GitHub Sponsors configuration. |
 | [`.github/workflows/dotnet-sdk-sync.yml`](.github/workflows/dotnet-sdk-sync.yml) | Central automation that checks repository-root `global.json` files and opens SDK update Pull Requests when appropriate. |
+| [`.github/workflows/dotnet-repository-inventory.yml`](.github/workflows/dotnet-repository-inventory.yml) | Central read-only automation that inventories .NET projects across repositories accessible to the configured GitHub App. |
 
 ## How GitHub uses this repository
 
@@ -38,7 +43,9 @@ Examples of repository-specific overrides include:
 - codes of conduct;
 - build, testing, release, or compatibility requirements.
 
-## Central .NET SDK synchronization
+## Central .NET automations
+
+### .NET SDK synchronization
 
 The [`dotnet-sdk-sync.yml`](.github/workflows/dotnet-sdk-sync.yml) workflow provides centralized SDK maintenance for repositories accessible to the configured GitHub App.
 
@@ -58,14 +65,52 @@ The scheduled run executes every Monday at 09:00 in `America/Sao_Paulo` (12:00 U
 
 This workflow is maintenance automation, not a default community-health file inherited automatically by other repositories. It actively evaluates repositories through the GitHub App installation and creates repository-level Pull Requests when an eligible SDK update exists.
 
+### .NET repository inventory
+
+The [`dotnet-repository-inventory.yml`](.github/workflows/dotnet-repository-inventory.yml) workflow builds a consolidated, read-only inventory of .NET projects across repositories accessible to the configured GitHub App.
+
+Because this repository is public, the workflow publishes only public repository metadata in its GitHub Actions Summary and downloadable artifacts. Non-public repositories accessible to the GitHub App are skipped before cloning or reporting so private repository names, paths, frameworks, and SDK versions are not exposed through public workflow runs. If the same workflow is moved to a private repository, it can include non-public repositories because the run output and artifacts inherit that repository's restricted visibility.
+
+It uses [`rodri-oliveira-dev/DotNetRepoInspector`](https://github.com/rodri-oliveira-dev/DotNetRepoInspector) as the source of truth for project inspection. Project classification is based on evaluated MSBuild metadata from the Inspector, not Bash heuristics or raw `.csproj` parsing.
+
+The inventory identifies these project types:
+
+- `web`;
+- `worker`;
+- `console`;
+- `library`;
+- `test`;
+- `unknown`.
+
+The workflow keeps Target Framework and .NET SDK data separate. A Target Framework such as `net10.0` describes what the project targets at compile/runtime level, while a configured or resolved .NET SDK such as `10.0.100` describes the SDK used to evaluate/build tooling for the repository.
+
+The inventory runs manually through `workflow_dispatch` and weekly on Wednesdays at 09:30 in `America/Sao_Paulo` (12:30 UTC), avoiding the Monday schedule used by SDK synchronization. Concurrency prevents overlapping inventory runs.
+
+The workflow log shows the eligible repository count before inspection starts, then prints per-repository progress in `[current/total]` format with a short final status for each repository. Isolated repository-level failures do not interrupt inspection of the remaining repositories.
+
+The GitHub Actions Summary is the primary visible report. It shows one Markdown table row per `.csproj`, including repository, project path, project type, Target Framework, and SDK, followed by counts for planned and processed repositories, repositories with and without .NET projects, total projects, classification totals, and inspection warnings/errors. Repository-level problems are also consolidated in the summary and at the end of the workflow log.
+
+The workflow also exports:
+
+- `artifacts/dotnet-repository-inventory.csv`;
+- `artifacts/dotnet-repository-inventory.json`.
+
+Both files are uploaded as the `dotnet-repository-inventory` artifact with `retention-days: 3`, so they remain downloadable from the workflow run for 3 days.
+
+Repositories without `.csproj` files are counted and do not fail the run. Clone or inspection problems in individual reported repositories are recorded as warnings/status entries, and the consolidated report is still produced. The workflow uses the existing GitHub App credentials, requests only read permissions from GitHub Actions, ignores forks and archived repositories, inspects default branches only, removes per-repository temporary directories after inspection, and does not write to analyzed repositories.
+
 ## Repository structure
 
 ```text
 .
+├── .gitattributes
 ├── .github/
 │   ├── FUNDING.yml
 │   └── workflows/
+│       ├── dotnet-repository-inventory.yml
 │       └── dotnet-sdk-sync.yml
+├── .github.code-workspace
+├── .gitignore
 ├── CONTRIBUTING.md
 ├── SECURITY.md
 ├── README.md
@@ -80,7 +125,7 @@ This repository follows a few simple governance principles:
 - **least privilege** — cross-repository automation uses a GitHub App with scoped permissions;
 - **review before change** — maintenance automation opens Pull Requests instead of merging directly;
 - **safe defaults** — version-management automation avoids implicit major/minor migrations;
-- **observable automation** — workflow results are exposed through GitHub Actions logs and summaries.
+- **observable automation** — workflow results are exposed through GitHub Actions logs, summaries, and short-lived artifacts when structured data is useful.
 
 ## Contributing
 

@@ -1,0 +1,646 @@
+name: Inventory .NET repositories
+
+on:
+  schedule:
+    # 09:30 America/Sao_Paulo (12:30 UTC), every Wednesday.
+    - cron: "30 12 * * 3"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dotnet-repository-inventory
+  cancel-in-progress: false
+
+jobs:
+  inventory:
+    name: Inspect accessible .NET repositories
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Create GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ vars.DOTNET_SDK_SYNC_APP_CLIENT_ID }}
+          private-key: ${{ secrets.DOTNET_SDK_SYNC_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          permission-contents: read
+          permission-metadata: read
+
+      - name: Checkout DotNetRepoInspector
+        uses: actions/checkout@v4
+        with:
+          repository: rodri-oliveira-dev/DotNetRepoInspector
+          ref: main
+          path: .inspector
+          token: ${{ steps.app-token.outputs.token }}
+          persist-credentials: false
+
+      - name: Setup .NET SDKs
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+            10.0.x
+
+      - name: Build DotNetRepoInspector
+        shell: bash
+        env:
+          DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+          DOTNET_NOLOGO: "1"
+          INSPECTOR_PROJECT: ${{ github.workspace }}/.inspector/src/DotNetRepoInspector.Cli/DotNetRepoInspector.Cli.csproj
+        run: |
+          set -Eeuo pipefail
+
+          dotnet restore "$INSPECTOR_PROJECT"
+          dotnet build "$INSPECTOR_PROJECT" --configuration Release --no-restore
+
+      - name: Generate .NET repository inventory
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          OWNER: ${{ github.repository_owner }}
+          CURRENT_REPOSITORY_PRIVATE: ${{ github.event.repository.private }}
+          ARTIFACTS_DIR: ${{ github.workspace }}/artifacts
+          INSPECTOR_PROJECT: ${{ github.workspace }}/.inspector/src/DotNetRepoInspector.Cli/DotNetRepoInspector.Cli.csproj
+          DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+          DOTNET_NOLOGO: "1"
+        run: |
+          # shellcheck disable=SC2016
+          set -Eeuo pipefail
+
+          readonly INSPECTOR_REPOSITORY="rodri-oliveira-dev/DotNetRepoInspector"
+          readonly INSPECTOR_REF="main"
+          readonly INCLUDE_NON_PUBLIC_REPOSITORIES="$CURRENT_REPOSITORY_PRIVATE"
+
+          mkdir -p "$ARTIFACTS_DIR"
+
+          repositories_file="$(mktemp)"
+          eligible_repositories_file="$(mktemp)"
+          repositories_jsonl="$(mktemp)"
+          projects_jsonl="$(mktemp)"
+          problems_jsonl="$(mktemp)"
+          workspace_root="$(mktemp -d)"
+
+          cleanup() {
+            rm -f "$repositories_file" "$eligible_repositories_file" "$repositories_jsonl" "$projects_jsonl" "$problems_jsonl"
+            rm -rf "$workspace_root"
+          }
+          trap cleanup EXIT
+
+          append_repository() {
+            local repository="$1"
+            local visibility="$2"
+            local default_branch="$3"
+            local status="$4"
+            local csproj_count="$5"
+            local message="$6"
+
+            jq -cn \
+              --arg repository "$repository" \
+              --arg visibility "$visibility" \
+              --arg default_branch "$default_branch" \
+              --arg status "$status" \
+              --argjson csproj_count "$csproj_count" \
+              --arg message "$message" \
+              '{
+                repository: $repository,
+                visibility: $visibility,
+                default_branch: $default_branch,
+                status: $status,
+                csproj_count: $csproj_count,
+                message: $message
+              }' >> "$repositories_jsonl"
+          }
+
+          append_problem() {
+            local repository="$1"
+            local stage="$2"
+            local message="$3"
+
+            jq -cn \
+              --arg repository "$repository" \
+              --arg stage "$stage" \
+              --arg message "$message" \
+              '{
+                repository: $repository,
+                stage: $stage,
+                message: $message
+              }' >> "$problems_jsonl"
+          }
+
+          record_problem() {
+            local repository="$1"
+            local stage="$2"
+            local message="$3"
+
+            append_problem "$repository" "$stage" "$message"
+
+            if [[ "$repository_had_problem" == "0" ]]; then
+              repository_had_problem=1
+              repositories_with_warnings_errors=$((repositories_with_warnings_errors + 1))
+            fi
+          }
+
+          cleanup_repository() {
+            local cleanup_failed=0
+
+            rm -f \
+              "$csproj_paths_file" \
+              "$inspected_paths_file" \
+              "$missing_paths_file" \
+              "$inspection_file" \
+              "$inspector_stdout" \
+              "$inspector_stderr" || cleanup_failed=1
+
+            rm -rf "$repo_dir" || cleanup_failed=1
+
+            if [[ "$cleanup_failed" == "1" ]]; then
+              record_problem "$repository" "cleanup" "Temporary files could not be fully removed."
+              echo "::warning title=Repository cleanup failed::Temporary files for $repository could not be fully removed."
+            fi
+          }
+
+          print_repository_result() {
+            local position="$1"
+            local total="$2"
+            local status="$3"
+            local repository="$4"
+            local message="$5"
+
+            if [[ "$repository_had_problem" == "1" && "$status" == "OK" ]]; then
+              status="WARNING"
+            fi
+
+            printf '[%s/%s] %-9s %s - %s\n' "$position" "$total" "$status" "$repository" "$message"
+          }
+
+          append_project_fallback() {
+            local repository="$1"
+            local visibility="$2"
+            local default_branch="$3"
+            local project_path="$4"
+            local status="$5"
+
+            local project_file
+            local project_name
+            project_file="${project_path##*/}"
+            project_name="${project_file%.csproj}"
+
+            jq -cn \
+              --arg repository "$repository" \
+              --arg visibility "$visibility" \
+              --arg default_branch "$default_branch" \
+              --arg project_path "$project_path" \
+              --arg project_name "$project_name" \
+              --arg status "$status" \
+              '{
+                repository: $repository,
+                visibility: $visibility,
+                default_branch: $default_branch,
+                project_path: $project_path,
+                project_name: $project_name,
+                classification: "unknown",
+                target_frameworks: [],
+                project_sdk: "",
+                configured_dotnet_sdk: "",
+                resolved_dotnet_sdk: "",
+                is_test: false,
+                is_packable: false,
+                output_type: "",
+                status: $status,
+                diagnostics: []
+              }' >> "$projects_jsonl"
+          }
+
+          append_projects_from_report() {
+            local repository="$1"
+            local visibility="$2"
+            local default_branch="$3"
+            local exit_code="$4"
+            local report_file="$5"
+
+            jq -c \
+              --arg repository "$repository" \
+              --arg visibility "$visibility" \
+              --arg default_branch "$default_branch" \
+              --argjson exit_code "$exit_code" '
+              def text_or_empty(value): value // "";
+              . as $report
+              | ($report.dotNetSdk.configured.version // "") as $configured_sdk
+              | ($report.dotNetSdk.resolvedVersion // "") as $repo_resolved_sdk
+              | $report.projects[]?
+              | ([
+                  .diagnostics[]?.severity,
+                  (if $exit_code == 0 then empty else "warning" end)
+                ] | map((. // "") | ascii_downcase)) as $severities
+              | {
+                  repository: $repository,
+                  visibility: $visibility,
+                  default_branch: $default_branch,
+                  project_path: text_or_empty(.path),
+                  project_name: text_or_empty(.name),
+                  classification: (.classification.kind // "unknown"),
+                  target_frameworks: (.targetFrameworks // []),
+                  project_sdk: ((.sdks // []) | map(.name // empty) | join("; ")),
+                  configured_dotnet_sdk: $configured_sdk,
+                  resolved_dotnet_sdk: (.resolvedSdkVersion // $repo_resolved_sdk // ""),
+                  is_test: (.isTestProject // false),
+                  is_packable: (.isPackable // false),
+                  output_type: text_or_empty(.outputType),
+                  status: (
+                    if any($severities[]; . == "error") then "error"
+                    elif any($severities[]; . == "warning") then "warning"
+                    else "ok"
+                    end
+                  ),
+                  diagnostics: (.diagnostics // [])
+                }' "$report_file" >> "$projects_jsonl"
+          }
+
+          write_summary_markdown() {
+            local inventory_json="$1"
+
+            {
+              echo "# .NET repository inventory"
+              echo
+              printf 'Inspector: `%s@%s`\n' "$INSPECTOR_REPOSITORY" "$INSPECTOR_REF"
+              echo
+              echo "| Repository | Project | Type | Target Framework | SDK |"
+              echo "| --- | --- | --- | --- | --- |"
+
+              jq -r '
+                def md:
+                  tostring
+                  | gsub("\r|\n"; " ")
+                  | gsub("\\|"; "\\|");
+                def sdk:
+                  if (.configured_dotnet_sdk == "" and .resolved_dotnet_sdk == "") then ""
+                  elif (.configured_dotnet_sdk == "") then ("resolved " + .resolved_dotnet_sdk)
+                  elif (.resolved_dotnet_sdk == "" or .resolved_dotnet_sdk == .configured_dotnet_sdk) then .configured_dotnet_sdk
+                  else (.configured_dotnet_sdk + " -> " + .resolved_dotnet_sdk)
+                  end;
+                .projects[]
+                | [
+                    .repository,
+                    (.project_path // .project_name // ""),
+                    .classification,
+                    ((.target_frameworks // []) | join("<br>")),
+                    sdk
+                  ]
+                | "| " + (map(md) | join(" | ")) + " |"
+              ' "$inventory_json"
+
+              echo
+              echo "## Summary"
+              echo
+              echo "| Metric | Count |"
+              echo "| --- | ---: |"
+              jq -r '
+                .summary
+                | [
+                    ["Repositories planned", .repositories_planned],
+                    ["Repositories processed", .repositories_processed],
+                    ["Repositories scanned", .repositories_scanned],
+                    ["Repositories with .NET projects", .repositories_with_dotnet_projects],
+                    ["Repositories without .NET projects", .repositories_without_dotnet_projects],
+                    ["Repositories with warnings/errors", .repositories_with_warnings_errors],
+                    ["Total .NET projects", .total_dotnet_projects],
+                    ["Web projects", .web_projects],
+                    ["Worker projects", .worker_projects],
+                    ["Console projects", .console_projects],
+                    ["Library projects", .library_projects],
+                    ["Test projects", .test_projects],
+                    ["Unknown projects", .unknown_projects],
+                    ["Inspection warnings/errors", .inspection_warnings_errors]
+                  ][]
+                | "| \(.[0]) | \(.[1]) |"
+              ' "$inventory_json"
+
+              echo
+              echo "## Inspection problems"
+              echo
+              if jq -e '(.problems // []) | length > 0' "$inventory_json" >/dev/null; then
+                echo "| Repository | Stage | Problem |"
+                echo "| --- | --- | --- |"
+                jq -r '
+                  def md:
+                    tostring
+                    | gsub("\r|\n"; " ")
+                    | gsub("\\|"; "\\|");
+                  .problems[]
+                  | [
+                      .repository,
+                      .stage,
+                      .message
+                    ]
+                  | "| " + (map(md) | join(" | ")) + " |"
+                ' "$inventory_json"
+              else
+                echo "No repository-level inspection problems were detected."
+              fi
+            } >> "$GITHUB_STEP_SUMMARY"
+          }
+
+          gh api --paginate "/installation/repositories?per_page=100" \
+            --jq '
+              .repositories[]
+              | [
+                  .full_name,
+                  (.owner.login // ""),
+                  (.visibility // (if .private then "private" else "public" end)),
+                  (.default_branch // ""),
+                  (.archived | tostring),
+                  (.fork | tostring)
+                ]
+              | @tsv
+            ' > "$repositories_file"
+
+          awk -v owner="$OWNER" -v include_non_public="$INCLUDE_NON_PUBLIC_REPOSITORIES" -F '\t' '
+            $1 != "" &&
+            $2 == owner &&
+            $5 != "true" &&
+            $6 != "true" &&
+            (include_non_public == "true" || $3 == "public")
+          ' "$repositories_file" > "$eligible_repositories_file"
+
+          repositories_planned="$(wc -l < "$eligible_repositories_file" | tr -d '[:space:]')"
+          repositories_scanned=0
+          repositories_processed=0
+          repositories_with_dotnet_projects=0
+          repositories_without_dotnet_projects=0
+          repositories_with_warnings_errors=0
+          inspection_warnings_errors=0
+
+          echo ".NET repository inventory"
+          echo "Eligible repositories: $repositories_planned"
+          echo "Starting repository inspection..."
+
+          while IFS=$'\t' read -r repository _repository_owner visibility default_branch _archived _fork; do
+            [[ -z "$repository" ]] && continue
+
+            repositories_processed=$((repositories_processed + 1))
+            repositories_scanned=$repositories_processed
+            repository_had_problem=0
+            repository_position="$repositories_processed"
+            default_branch_display="${default_branch:-<none>}"
+
+            printf '[%s/%s] Inspecting %s (branch: %s)\n' "$repository_position" "$repositories_planned" "$repository" "$default_branch_display"
+
+            if [[ -z "$default_branch" ]]; then
+              record_problem "$repository" "discovery" "Repository does not expose a default branch."
+              inspection_warnings_errors=$((inspection_warnings_errors + 1))
+              append_repository "$repository" "$visibility" "$default_branch" "missing_default_branch" 0 "Repository does not expose a default branch."
+              echo "::warning title=Repository skipped::$repository does not expose a default branch."
+              print_repository_result "$repository_position" "$repositories_planned" "FAILED" "$repository" "missing default branch"
+              continue
+            fi
+
+            repo_dir="$(mktemp -d "$workspace_root/repository.XXXXXX")"
+            csproj_paths_file="$(mktemp)"
+            inspected_paths_file="$(mktemp)"
+            missing_paths_file="$(mktemp)"
+            inspection_file="$(mktemp)"
+            inspector_stdout="$(mktemp)"
+            inspector_stderr="$(mktemp)"
+
+            rm -rf "$repo_dir"
+
+            if ! gh repo clone "$repository" "$repo_dir" -- --depth 1 --branch "$default_branch" --filter=blob:none --quiet; then
+              record_problem "$repository" "clone" "Default branch could not be cloned."
+              inspection_warnings_errors=$((inspection_warnings_errors + 1))
+              append_repository "$repository" "$visibility" "$default_branch" "clone_failed" 0 "Default branch could not be cloned."
+              echo "::warning title=Repository clone failed::Unable to clone $repository on $default_branch."
+              cleanup_repository
+              print_repository_result "$repository_position" "$repositories_planned" "FAILED" "$repository" "clone failed"
+              continue
+            fi
+
+            (
+              cd "$repo_dir"
+              find . -type f -name '*.csproj' -not -path './.git/*' -printf '%P\n' | LC_ALL=C sort
+            ) > "$csproj_paths_file"
+
+            csproj_count="$(wc -l < "$csproj_paths_file" | tr -d '[:space:]')"
+
+            if [[ "$csproj_count" == "0" ]]; then
+              repositories_without_dotnet_projects=$((repositories_without_dotnet_projects + 1))
+              append_repository "$repository" "$visibility" "$default_branch" "no_dotnet_projects" 0 "No .csproj files found."
+              cleanup_repository
+              print_repository_result "$repository_position" "$repositories_planned" "NO-DOTNET" "$repository" "no .csproj files"
+              continue
+            fi
+
+            repositories_with_dotnet_projects=$((repositories_with_dotnet_projects + 1))
+
+            set +e
+            env \
+              -u GH_TOKEN \
+              -u GITHUB_TOKEN \
+              -u ACTIONS_ID_TOKEN_REQUEST_TOKEN \
+              -u ACTIONS_RUNTIME_TOKEN \
+              dotnet run \
+                --project "$INSPECTOR_PROJECT" \
+                --configuration Release \
+                --no-build \
+                -- "$repo_dir" \
+                --output "$inspection_file" \
+                > "$inspector_stdout" \
+                2> "$inspector_stderr"
+            inspector_exit_code=$?
+            set -e
+
+            if [[ -s "$inspection_file" ]] && jq -e . "$inspection_file" >/dev/null 2>&1; then
+              append_projects_from_report "$repository" "$visibility" "$default_branch" "$inspector_exit_code" "$inspection_file"
+
+              jq -r '.projects[]?.path // empty' "$inspection_file" | LC_ALL=C sort > "$inspected_paths_file"
+              comm -23 "$csproj_paths_file" "$inspected_paths_file" > "$missing_paths_file"
+
+              while IFS= read -r project_path; do
+                [[ -z "$project_path" ]] && continue
+                append_project_fallback "$repository" "$visibility" "$default_branch" "$project_path" "not_inspected"
+              done < "$missing_paths_file"
+
+              diagnostic_count="$(
+                jq '
+                  [
+                    .diagnostics[]?,
+                    .projects[]?.diagnostics[]?
+                  ]
+                  | map(select((.severity // "" | ascii_downcase) == "warning" or (.severity // "" | ascii_downcase) == "error"))
+                  | length
+                ' "$inspection_file"
+              )"
+
+              if [[ "$diagnostic_count" != "0" ]]; then
+                record_problem "$repository" "inspection" "Inspector reported $diagnostic_count warning/error diagnostic(s)."
+                inspection_warnings_errors=$((inspection_warnings_errors + diagnostic_count))
+                echo "::warning title=Repository inspection produced diagnostics::$repository produced $diagnostic_count warning/error diagnostic(s)."
+              fi
+
+              if [[ "$inspector_exit_code" != "0" ]]; then
+                record_problem "$repository" "inspection" "Inspector exited with code $inspector_exit_code."
+                inspection_warnings_errors=$((inspection_warnings_errors + 1))
+                echo "::warning title=Repository inspection returned non-zero::$repository inspection exited with code $inspector_exit_code."
+              fi
+
+              if [[ -s "$missing_paths_file" ]]; then
+                missing_count="$(wc -l < "$missing_paths_file" | tr -d '[:space:]')"
+                record_problem "$repository" "report" "$missing_count .csproj file(s) were not present in the Inspector report."
+                inspection_warnings_errors=$((inspection_warnings_errors + missing_count))
+                echo "::warning title=Project inspection incomplete::$repository has $missing_count .csproj file(s) not present in the Inspector report."
+              fi
+
+              append_repository "$repository" "$visibility" "$default_branch" "inspected" "$csproj_count" "Inspection completed."
+              cleanup_repository
+
+              if [[ "$repository_had_problem" == "1" ]]; then
+                print_repository_result "$repository_position" "$repositories_planned" "WARNING" "$repository" "inspection completed with problem(s)"
+              else
+                print_repository_result "$repository_position" "$repositories_planned" "OK" "$repository" "$csproj_count project(s)"
+              fi
+            else
+              record_problem "$repository" "report" "Inspector did not produce a valid JSON report."
+              inspection_warnings_errors=$((inspection_warnings_errors + 1))
+              echo "::warning title=Repository inspection failed::$repository inspection did not produce a valid JSON report."
+
+              if [[ "$inspector_exit_code" != "0" ]]; then
+                record_problem "$repository" "inspection" "Inspector exited with code $inspector_exit_code."
+                inspection_warnings_errors=$((inspection_warnings_errors + 1))
+                echo "::warning title=Repository inspection returned non-zero::$repository inspection exited with code $inspector_exit_code."
+              fi
+
+              while IFS= read -r project_path; do
+                [[ -z "$project_path" ]] && continue
+                append_project_fallback "$repository" "$visibility" "$default_branch" "$project_path" "inspection_failed"
+              done < "$csproj_paths_file"
+
+              append_repository "$repository" "$visibility" "$default_branch" "inspection_failed" "$csproj_count" "Inspection did not produce a valid JSON report."
+              cleanup_repository
+              print_repository_result "$repository_position" "$repositories_planned" "FAILED" "$repository" "invalid or missing Inspector report"
+            fi
+          done < "$eligible_repositories_file"
+
+          inventory_json="$ARTIFACTS_DIR/dotnet-repository-inventory.json"
+          inventory_csv="$ARTIFACTS_DIR/dotnet-repository-inventory.csv"
+
+          jq -n \
+            --arg generated_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --arg owner "$OWNER" \
+            --arg inspector_repository "$INSPECTOR_REPOSITORY" \
+            --arg inspector_ref "$INSPECTOR_REF" \
+            --argjson include_non_public_repositories "$INCLUDE_NON_PUBLIC_REPOSITORIES" \
+            --argjson repositories_planned "$repositories_planned" \
+            --argjson repositories_processed "$repositories_processed" \
+            --argjson repositories_scanned "$repositories_scanned" \
+            --argjson repositories_with_dotnet_projects "$repositories_with_dotnet_projects" \
+            --argjson repositories_without_dotnet_projects "$repositories_without_dotnet_projects" \
+            --argjson repositories_with_warnings_errors "$repositories_with_warnings_errors" \
+            --argjson inspection_warnings_errors "$inspection_warnings_errors" \
+            --slurpfile repositories <(jq -s '.' "$repositories_jsonl") \
+            --slurpfile projects <(jq -s '.' "$projects_jsonl") \
+            --slurpfile problems <(jq -s '.' "$problems_jsonl") \
+            '($projects[0] // []) as $project_rows
+            | {
+                generated_at: $generated_at,
+                owner: $owner,
+                source: {
+                  inspector_repository: $inspector_repository,
+                  inspector_ref: $inspector_ref,
+                  include_non_public_repositories: $include_non_public_repositories
+                },
+                summary: {
+                  repositories_planned: $repositories_planned,
+                  repositories_processed: $repositories_processed,
+                  repositories_scanned: $repositories_scanned,
+                  repositories_with_dotnet_projects: $repositories_with_dotnet_projects,
+                  repositories_without_dotnet_projects: $repositories_without_dotnet_projects,
+                  repositories_with_warnings_errors: $repositories_with_warnings_errors,
+                  total_dotnet_projects: ($project_rows | length),
+                  web_projects: ($project_rows | map(select(.classification == "web")) | length),
+                  worker_projects: ($project_rows | map(select(.classification == "worker")) | length),
+                  console_projects: ($project_rows | map(select(.classification == "console")) | length),
+                  library_projects: ($project_rows | map(select(.classification == "library")) | length),
+                  test_projects: ($project_rows | map(select(.classification == "test" or .is_test == true)) | length),
+                  unknown_projects: ($project_rows | map(select(.classification == "unknown")) | length),
+                  inspection_warnings_errors: $inspection_warnings_errors
+                },
+                repositories: ($repositories[0] // []),
+                projects: $project_rows,
+                problems: ($problems[0] // [])
+              }' > "$inventory_json"
+
+          jq -r '
+            ([
+              "repository",
+              "visibility",
+              "default_branch",
+              "project_path",
+              "project_name",
+              "classification",
+              "target_frameworks",
+              "project_sdk",
+              "configured_dotnet_sdk",
+              "resolved_dotnet_sdk",
+              "is_test",
+              "is_packable",
+              "output_type",
+              "status"
+            ] | @csv),
+            (.projects[]
+              | [
+                  .repository,
+                  .visibility,
+                  .default_branch,
+                  .project_path,
+                  .project_name,
+                  .classification,
+                  ((.target_frameworks // []) | join("; ")),
+                  .project_sdk,
+                  .configured_dotnet_sdk,
+                  .resolved_dotnet_sdk,
+                  (.is_test | tostring),
+                  (.is_packable | tostring),
+                  .output_type,
+                  .status
+                ]
+              | @csv)
+          ' "$inventory_json" > "$inventory_csv"
+
+          jq -e . "$inventory_json" >/dev/null
+          test -s "$inventory_csv"
+
+          total_dotnet_projects="$(jq -r '.summary.total_dotnet_projects' "$inventory_json")"
+
+          echo "=================================================="
+          echo ".NET repository inventory completed"
+          echo "=================================================="
+          echo
+          printf 'Repositories planned: %s\n' "$repositories_planned"
+          printf 'Repositories processed: %s\n' "$repositories_processed"
+          printf 'Repositories with .NET projects: %s\n' "$repositories_with_dotnet_projects"
+          printf 'Repositories without .NET projects: %s\n' "$repositories_without_dotnet_projects"
+          printf 'Repositories with warnings/errors: %s\n' "$repositories_with_warnings_errors"
+          printf 'Total .NET projects: %s\n' "$total_dotnet_projects"
+          echo
+
+          if [[ -s "$problems_jsonl" ]]; then
+            echo "Problems detected:"
+            echo
+            jq -r '"- \(.repository) | \(.stage) | \(.message)"' "$problems_jsonl"
+          else
+            echo "Problems detected: none"
+          fi
+
+          write_summary_markdown "$inventory_json"
+
+      - name: Upload inventory artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dotnet-repository-inventory
+          path: artifacts/
+          if-no-files-found: warn
+          retention-days: 3

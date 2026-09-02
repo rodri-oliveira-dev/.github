@@ -1,0 +1,27 @@
+{
+  "folders": [
+    {
+      "name": ".github",
+      "path": "."
+    }
+  ],
+  "settings": {
+    "editor.insertSpaces": true,
+    "editor.tabSize": 2,
+    "files.eol": "\n",
+    "files.insertFinalNewline": true,
+    "files.trimTrailingWhitespace": true,
+    "markdown.extension.toc.levels": "2..3",
+    "yaml.schemas": {
+      "https://json.schemastore.org/github-workflow.json": ".github/workflows/*.{yml,yaml}",
+      "https://json.schemastore.org/github-funding.json": ".github/FUNDING.yml"
+    }
+  },
+  "extensions": {
+    "recommendations": [
+      "github.vscode-github-actions",
+      "redhat.vscode-yaml",
+      "davidanson.vscode-markdownlint"
+    ]
+  }
+}

@@ -1,0 +1,18 @@
+# Generated workflow artifacts
+artifacts/
+
+# Local validation and temporary files
+.tmp-*/
+tmp/
+temp/
+*.tmp
+*.log
+
+# Local tool checkouts/build output
+.inspector/
+
+# Editor and OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

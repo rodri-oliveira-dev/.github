@@ -86,7 +86,9 @@ O workflow mantém Target Framework e .NET SDK como conceitos separados. Um Targ
 
 O inventário pode ser executado manualmente por `workflow_dispatch` e também roda semanalmente às quartas-feiras, às 09:30 em `America/Sao_Paulo` (12:30 UTC), sem sobrepor o agendamento de segunda-feira da sincronização de SDK. A configuração de concorrência impede execuções simultâneas do inventário.
 
-O GitHub Actions Summary é o relatório visual principal. Ele mostra uma tabela Markdown com uma linha por `.csproj`, incluindo repositório, caminho do projeto, tipo, Target Framework e SDK, seguida por contagens de repositórios verificados, repositórios com e sem projetos .NET, total de projetos, totais por classificação e warnings/erros de inspeção.
+O log do workflow mostra a quantidade de repositórios elegíveis antes do início da inspeção e, em seguida, imprime o progresso por repositório no formato `[atual/total]`, com um status final curto para cada repositório. Falhas isoladas no nível de um repositório não interrompem a inspeção dos demais.
+
+O GitHub Actions Summary é o relatório visual principal. Ele mostra uma tabela Markdown com uma linha por `.csproj`, incluindo repositório, caminho do projeto, tipo, Target Framework e SDK, seguida por contagens de repositórios planejados e processados, repositórios com e sem projetos .NET, total de projetos, totais por classificação e warnings/erros de inspeção. Problemas no nível de repositório também são consolidados no summary e ao final do log do workflow.
 
 O workflow também exporta:
 

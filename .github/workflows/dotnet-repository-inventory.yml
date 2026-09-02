@@ -78,12 +78,14 @@ jobs:
           mkdir -p "$ARTIFACTS_DIR"
 
           repositories_file="$(mktemp)"
+          eligible_repositories_file="$(mktemp)"
           repositories_jsonl="$(mktemp)"
           projects_jsonl="$(mktemp)"
+          problems_jsonl="$(mktemp)"
           workspace_root="$(mktemp -d)"
 
           cleanup() {
-            rm -f "$repositories_file" "$repositories_jsonl" "$projects_jsonl"
+            rm -f "$repositories_file" "$eligible_repositories_file" "$repositories_jsonl" "$projects_jsonl" "$problems_jsonl"
             rm -rf "$workspace_root"
           }
           trap cleanup EXIT
@@ -111,6 +113,68 @@ jobs:
                 csproj_count: $csproj_count,
                 message: $message
               }' >> "$repositories_jsonl"
+          }
+
+          append_problem() {
+            local repository="$1"
+            local stage="$2"
+            local message="$3"
+
+            jq -cn \
+              --arg repository "$repository" \
+              --arg stage "$stage" \
+              --arg message "$message" \
+              '{
+                repository: $repository,
+                stage: $stage,
+                message: $message
+              }' >> "$problems_jsonl"
+          }
+
+          record_problem() {
+            local repository="$1"
+            local stage="$2"
+            local message="$3"
+
+            append_problem "$repository" "$stage" "$message"
+
+            if [[ "$repository_had_problem" == "0" ]]; then
+              repository_had_problem=1
+              repositories_with_warnings_errors=$((repositories_with_warnings_errors + 1))
+            fi
+          }
+
+          cleanup_repository() {
+            local cleanup_failed=0
+
+            rm -f \
+              "$csproj_paths_file" \
+              "$inspected_paths_file" \
+              "$missing_paths_file" \
+              "$inspection_file" \
+              "$inspector_stdout" \
+              "$inspector_stderr" || cleanup_failed=1
+
+            rm -rf "$repo_dir" || cleanup_failed=1
+
+            if [[ "$cleanup_failed" == "1" ]]; then
+              record_problem "$repository" "cleanup" "Temporary files could not be fully removed."
+              echo "::warning title=Repository cleanup failed::Temporary files for $repository could not be fully removed."
+            fi
+          }
+
+          print_repository_result() {
+            local position="$1"
+            local total="$2"
+            local status="$3"
+            local repository="$4"
+            local message="$5"
+
+            if [[ "$repository_had_problem" == "1" && "$status" == "OK" ]]; then
+              status="WARNING"
+            fi
+
+            printf '[%s/%s] %-9s %s - %s\n' "$position" "$total" "$status" "$repository" "$message"
           }
 
           append_project_fallback() {
@@ -237,9 +301,12 @@ jobs:
               jq -r '
                 .summary
                 | [
+                    ["Repositories planned", .repositories_planned],
+                    ["Repositories processed", .repositories_processed],
                     ["Repositories scanned", .repositories_scanned],
                     ["Repositories with .NET projects", .repositories_with_dotnet_projects],
                     ["Repositories without .NET projects", .repositories_without_dotnet_projects],
+                    ["Repositories with warnings/errors", .repositories_with_warnings_errors],
                     ["Total .NET projects", .total_dotnet_projects],
                     ["Web projects", .web_projects],
                     ["Worker projects", .worker_projects],
@@ -251,6 +318,29 @@ jobs:
                   ][]
                 | "| \(.[0]) | \(.[1]) |"
               ' "$inventory_json"
+
+              echo
+              echo "## Inspection problems"
+              echo
+              if jq -e '(.problems // []) | length > 0' "$inventory_json" >/dev/null; then
+                echo "| Repository | Stage | Problem |"
+                echo "| --- | --- | --- |"
+                jq -r '
+                  def md:
+                    tostring
+                    | gsub("\r|\n"; " ")
+                    | gsub("\\|"; "\\|");
+                  .problems[]
+                  | [
+                      .repository,
+                      .stage,
+                      .message
+                    ]
+                  | "| " + (map(md) | join(" | ")) + " |"
+                ' "$inventory_json"
+              else
+                echo "No repository-level inspection problems were detected."
+              fi
             } >> "$GITHUB_STEP_SUMMARY"
           }
 
@@ -268,23 +358,43 @@ jobs:
               | @tsv
             ' > "$repositories_file"
 
+          awk -v owner="$OWNER" -v include_non_public="$INCLUDE_NON_PUBLIC_REPOSITORIES" -F '\t' '
+            $1 != "" &&
+            $2 == owner &&
+            $5 != "true" &&
+            $6 != "true" &&
+            (include_non_public == "true" || $3 == "public")
+          ' "$repositories_file" > "$eligible_repositories_file"
+
+          repositories_planned="$(wc -l < "$eligible_repositories_file" | tr -d '[:space:]')"
           repositories_scanned=0
+          repositories_processed=0
           repositories_with_dotnet_projects=0
           repositories_without_dotnet_projects=0
+          repositories_with_warnings_errors=0
           inspection_warnings_errors=0
 
-          while IFS=$'\t' read -r repository repository_owner visibility default_branch archived fork; do
-            [[ -z "$repository" ]] && continue
-            [[ "$repository_owner" != "$OWNER" ]] && continue
-            [[ "$archived" == "true" || "$fork" == "true" ]] && continue
-            [[ "$INCLUDE_NON_PUBLIC_REPOSITORIES" != "true" && "$visibility" != "public" ]] && continue
+          echo ".NET repository inventory"
+          echo "Eligible repositories: $repositories_planned"
+          echo "Starting repository inspection..."
 
-            repositories_scanned=$((repositories_scanned + 1))
+          while IFS=$'\t' read -r repository _repository_owner visibility default_branch _archived _fork; do
+            [[ -z "$repository" ]] && continue
+
+            repositories_processed=$((repositories_processed + 1))
+            repositories_scanned=$repositories_processed
+            repository_had_problem=0
+            repository_position="$repositories_processed"
+            default_branch_display="${default_branch:-<none>}"
+
+            printf '[%s/%s] Inspecting %s (branch: %s)\n' "$repository_position" "$repositories_planned" "$repository" "$default_branch_display"
 
             if [[ -z "$default_branch" ]]; then
+              record_problem "$repository" "discovery" "Repository does not expose a default branch."
               inspection_warnings_errors=$((inspection_warnings_errors + 1))
               append_repository "$repository" "$visibility" "$default_branch" "missing_default_branch" 0 "Repository does not expose a default branch."
               echo "::warning title=Repository skipped::$repository does not expose a default branch."
+              print_repository_result "$repository_position" "$repositories_planned" "FAILED" "$repository" "missing default branch"
               continue
             fi
 
@@ -299,11 +409,12 @@ jobs:
             rm -rf "$repo_dir"
 
             if ! gh repo clone "$repository" "$repo_dir" -- --depth 1 --branch "$default_branch" --filter=blob:none --quiet; then
+              record_problem "$repository" "clone" "Default branch could not be cloned."
               inspection_warnings_errors=$((inspection_warnings_errors + 1))
               append_repository "$repository" "$visibility" "$default_branch" "clone_failed" 0 "Default branch could not be cloned."
               echo "::warning title=Repository clone failed::Unable to clone $repository on $default_branch."
-              rm -f "$csproj_paths_file" "$inspected_paths_file" "$missing_paths_file" "$inspection_file" "$inspector_stdout" "$inspector_stderr"
-              rm -rf "$repo_dir"
+              cleanup_repository
+              print_repository_result "$repository_position" "$repositories_planned" "FAILED" "$repository" "clone failed"
               continue
             fi
 
@@ -317,8 +428,8 @@ jobs:
             if [[ "$csproj_count" == "0" ]]; then
               repositories_without_dotnet_projects=$((repositories_without_dotnet_projects + 1))
               append_repository "$repository" "$visibility" "$default_branch" "no_dotnet_projects" 0 "No .csproj files found."
-              rm -f "$csproj_paths_file" "$inspected_paths_file" "$missing_paths_file" "$inspection_file" "$inspector_stdout" "$inspector_stderr"
-              rm -rf "$repo_dir"
+              cleanup_repository
+              print_repository_result "$repository_position" "$repositories_planned" "NO-DOTNET" "$repository" "no .csproj files"
               continue
             fi
 
@@ -364,23 +475,42 @@ jobs:
               )"
 
               if [[ "$diagnostic_count" != "0" ]]; then
+                record_problem "$repository" "inspection" "Inspector reported $diagnostic_count warning/error diagnostic(s)."
                 inspection_warnings_errors=$((inspection_warnings_errors + diagnostic_count))
                 echo "::warning title=Repository inspection produced diagnostics::$repository produced $diagnostic_count warning/error diagnostic(s)."
-              elif [[ "$inspector_exit_code" != "0" ]]; then
+              fi
+
+              if [[ "$inspector_exit_code" != "0" ]]; then
+                record_problem "$repository" "inspection" "Inspector exited with code $inspector_exit_code."
                 inspection_warnings_errors=$((inspection_warnings_errors + 1))
                 echo "::warning title=Repository inspection returned non-zero::$repository inspection exited with code $inspector_exit_code."
               fi
 
               if [[ -s "$missing_paths_file" ]]; then
                 missing_count="$(wc -l < "$missing_paths_file" | tr -d '[:space:]')"
+                record_problem "$repository" "report" "$missing_count .csproj file(s) were not present in the Inspector report."
                 inspection_warnings_errors=$((inspection_warnings_errors + missing_count))
                 echo "::warning title=Project inspection incomplete::$repository has $missing_count .csproj file(s) not present in the Inspector report."
               fi
 
               append_repository "$repository" "$visibility" "$default_branch" "inspected" "$csproj_count" "Inspection completed."
+              cleanup_repository
+
+              if [[ "$repository_had_problem" == "1" ]]; then
+                print_repository_result "$repository_position" "$repositories_planned" "WARNING" "$repository" "inspection completed with problem(s)"
+              else
+                print_repository_result "$repository_position" "$repositories_planned" "OK" "$repository" "$csproj_count project(s)"
+              fi
             else
+              record_problem "$repository" "report" "Inspector did not produce a valid JSON report."
               inspection_warnings_errors=$((inspection_warnings_errors + 1))
               echo "::warning title=Repository inspection failed::$repository inspection did not produce a valid JSON report."
+
+              if [[ "$inspector_exit_code" != "0" ]]; then
+                record_problem "$repository" "inspection" "Inspector exited with code $inspector_exit_code."
+                inspection_warnings_errors=$((inspection_warnings_errors + 1))
+                echo "::warning title=Repository inspection returned non-zero::$repository inspection exited with code $inspector_exit_code."
+              fi
 
               while IFS= read -r project_path; do
                 [[ -z "$project_path" ]] && continue
@@ -388,11 +518,10 @@ jobs:
               done < "$csproj_paths_file"
 
               append_repository "$repository" "$visibility" "$default_branch" "inspection_failed" "$csproj_count" "Inspection did not produce a valid JSON report."
+              cleanup_repository
+              print_repository_result "$repository_position" "$repositories_planned" "FAILED" "$repository" "invalid or missing Inspector report"
             fi
-
-            rm -f "$csproj_paths_file" "$inspected_paths_file" "$missing_paths_file" "$inspection_file" "$inspector_stdout" "$inspector_stderr"
-            rm -rf "$repo_dir"
-          done < "$repositories_file"
+          done < "$eligible_repositories_file"
 
           inventory_json="$ARTIFACTS_DIR/dotnet-repository-inventory.json"
           inventory_csv="$ARTIFACTS_DIR/dotnet-repository-inventory.csv"
@@ -403,12 +532,16 @@ jobs:
             --arg inspector_repository "$INSPECTOR_REPOSITORY" \
             --arg inspector_ref "$INSPECTOR_REF" \
             --argjson include_non_public_repositories "$INCLUDE_NON_PUBLIC_REPOSITORIES" \
+            --argjson repositories_planned "$repositories_planned" \
+            --argjson repositories_processed "$repositories_processed" \
             --argjson repositories_scanned "$repositories_scanned" \
             --argjson repositories_with_dotnet_projects "$repositories_with_dotnet_projects" \
             --argjson repositories_without_dotnet_projects "$repositories_without_dotnet_projects" \
+            --argjson repositories_with_warnings_errors "$repositories_with_warnings_errors" \
             --argjson inspection_warnings_errors "$inspection_warnings_errors" \
             --slurpfile repositories <(jq -s '.' "$repositories_jsonl") \
             --slurpfile projects <(jq -s '.' "$projects_jsonl") \
+            --slurpfile problems <(jq -s '.' "$problems_jsonl") \
             '($projects[0] // []) as $project_rows
             | {
                 generated_at: $generated_at,
@@ -419,9 +552,12 @@ jobs:
                   include_non_public_repositories: $include_non_public_repositories
                 },
                 summary: {
+                  repositories_planned: $repositories_planned,
+                  repositories_processed: $repositories_processed,
                   repositories_scanned: $repositories_scanned,
                   repositories_with_dotnet_projects: $repositories_with_dotnet_projects,
                   repositories_without_dotnet_projects: $repositories_without_dotnet_projects,
+                  repositories_with_warnings_errors: $repositories_with_warnings_errors,
                   total_dotnet_projects: ($project_rows | length),
                   web_projects: ($project_rows | map(select(.classification == "web")) | length),
                   worker_projects: ($project_rows | map(select(.classification == "worker")) | length),
@@ -432,7 +568,8 @@ jobs:
                   inspection_warnings_errors: $inspection_warnings_errors
                 },
                 repositories: ($repositories[0] // []),
-                projects: $project_rows
+                projects: $project_rows,
+                problems: ($problems[0] // [])
               }' > "$inventory_json"
 
           jq -r '
@@ -474,6 +611,28 @@ jobs:
 
           jq -e . "$inventory_json" >/dev/null
           test -s "$inventory_csv"
+
+          total_dotnet_projects="$(jq -r '.summary.total_dotnet_projects' "$inventory_json")"
+
+          echo "=================================================="
+          echo ".NET repository inventory completed"
+          echo "=================================================="
+          echo
+          printf 'Repositories planned: %s\n' "$repositories_planned"
+          printf 'Repositories processed: %s\n' "$repositories_processed"
+          printf 'Repositories with .NET projects: %s\n' "$repositories_with_dotnet_projects"
+          printf 'Repositories without .NET projects: %s\n' "$repositories_without_dotnet_projects"
+          printf 'Repositories with warnings/errors: %s\n' "$repositories_with_warnings_errors"
+          printf 'Total .NET projects: %s\n' "$total_dotnet_projects"
+          echo
+
+          if [[ -s "$problems_jsonl" ]]; then
+            echo "Problems detected:"
+            echo
+            jq -r '"- \(.repository) | \(.stage) | \(.message)"' "$problems_jsonl"
+          else
+            echo "Problems detected: none"
+          fi
 
           write_summary_markdown "$inventory_json"
 

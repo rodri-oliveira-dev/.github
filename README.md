@@ -86,7 +86,9 @@ The workflow keeps Target Framework and .NET SDK data separate. A Target Framewo
 
 The inventory runs manually through `workflow_dispatch` and weekly on Wednesdays at 09:30 in `America/Sao_Paulo` (12:30 UTC), avoiding the Monday schedule used by SDK synchronization. Concurrency prevents overlapping inventory runs.
 
-The GitHub Actions Summary is the primary visible report. It shows one Markdown table row per `.csproj`, including repository, project path, project type, Target Framework, and SDK, followed by counts for scanned repositories, repositories with and without .NET projects, total projects, classification totals, and inspection warnings/errors.
+The workflow log shows the eligible repository count before inspection starts, then prints per-repository progress in `[current/total]` format with a short final status for each repository. Isolated repository-level failures do not interrupt inspection of the remaining repositories.
+
+The GitHub Actions Summary is the primary visible report. It shows one Markdown table row per `.csproj`, including repository, project path, project type, Target Framework, and SDK, followed by counts for planned and processed repositories, repositories with and without .NET projects, total projects, classification totals, and inspection warnings/errors. Repository-level problems are also consolidated in the summary and at the end of the workflow log.
 
 The workflow also exports:
 

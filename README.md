@@ -69,6 +69,8 @@ This workflow is maintenance automation, not a default community-health file inh
 
 The [`dotnet-repository-inventory.yml`](.github/workflows/dotnet-repository-inventory.yml) workflow builds a consolidated, read-only inventory of .NET projects across repositories accessible to the configured GitHub App.
 
+Because this repository is public, the workflow publishes only public repository metadata in its GitHub Actions Summary and downloadable artifacts. Non-public repositories accessible to the GitHub App are skipped before cloning or reporting so private repository names, paths, frameworks, and SDK versions are not exposed through public workflow runs. If the same workflow is moved to a private repository, it can include non-public repositories because the run output and artifacts inherit that repository's restricted visibility.
+
 It uses [`rodri-oliveira-dev/DotNetRepoInspector`](https://github.com/rodri-oliveira-dev/DotNetRepoInspector) as the source of truth for project inspection. Project classification is based on evaluated MSBuild metadata from the Inspector, not Bash heuristics or raw `.csproj` parsing.
 
 The inventory identifies these project types:
@@ -93,7 +95,7 @@ The workflow also exports:
 
 Both files are uploaded as the `dotnet-repository-inventory` artifact with `retention-days: 3`, so they remain downloadable from the workflow run for 3 days.
 
-Repositories without `.csproj` files are counted and do not fail the run. Clone or inspection problems in individual repositories are recorded as warnings/status entries, and the consolidated report is still produced. The workflow uses the existing GitHub App credentials, requests only read permissions from GitHub Actions, ignores forks and archived repositories, inspects default branches only, removes per-repository temporary directories after inspection, and does not write to analyzed repositories.
+Repositories without `.csproj` files are counted and do not fail the run. Clone or inspection problems in individual reported repositories are recorded as warnings/status entries, and the consolidated report is still produced. The workflow uses the existing GitHub App credentials, requests only read permissions from GitHub Actions, ignores forks and archived repositories, inspects default branches only, removes per-repository temporary directories after inspection, and does not write to analyzed repositories.
 
 ## Repository structure
 

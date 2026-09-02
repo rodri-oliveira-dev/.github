@@ -69,6 +69,8 @@ Esse workflow é uma automação de manutenção e não um arquivo de comunidade
 
 O workflow [`dotnet-repository-inventory.yml`](.github/workflows/dotnet-repository-inventory.yml) gera um inventário consolidado, somente leitura, dos projetos .NET existentes nos repositórios acessíveis à GitHub App configurada.
 
+Como este repositório é público, o workflow publica somente metadados de repositórios públicos no GitHub Actions Summary e nos artifacts baixáveis. Repositórios não públicos acessíveis à GitHub App são ignorados antes de clone ou relatório para que nomes de repositórios privados, caminhos, frameworks e versões de SDK não sejam expostos em execuções públicas. Se o mesmo workflow for movido para um repositório privado, ele pode incluir repositórios não públicos porque a saída da execução e os artifacts herdam a visibilidade restrita desse repositório.
+
 Ele usa [`rodri-oliveira-dev/DotNetRepoInspector`](https://github.com/rodri-oliveira-dev/DotNetRepoInspector) como fonte de verdade para inspeção dos projetos. A classificação é baseada em metadados MSBuild efetivos obtidos pelo Inspector, não em heurísticas Bash nem parsing direto de `.csproj`.
 
 O inventário identifica estes tipos de projeto:
@@ -93,7 +95,7 @@ O workflow também exporta:
 
 Os dois arquivos são enviados como artifact `dotnet-repository-inventory` com `retention-days: 3`, permanecendo disponíveis para download na execução do workflow por 3 dias.
 
-Repositórios sem arquivos `.csproj` são contabilizados e não fazem a execução falhar. Problemas de clone ou inspeção em repositórios individuais são registrados como warnings/status, e o relatório consolidado continua sendo produzido. O workflow reutiliza as credenciais existentes da GitHub App, solicita apenas permissões de leitura no GitHub Actions, ignora forks e repositórios arquivados, inspeciona somente a branch padrão, remove diretórios temporários de cada repositório após a inspeção e não escreve nos repositórios analisados.
+Repositórios sem arquivos `.csproj` são contabilizados e não fazem a execução falhar. Problemas de clone ou inspeção em repositórios individuais reportados são registrados como warnings/status, e o relatório consolidado continua sendo produzido. O workflow reutiliza as credenciais existentes da GitHub App, solicita apenas permissões de leitura no GitHub Actions, ignora forks e repositórios arquivados, inspeciona somente a branch padrão, remove diretórios temporários de cada repositório após a inspeção e não escreve nos repositórios analisados.
 
 ## Estrutura do repositório
 

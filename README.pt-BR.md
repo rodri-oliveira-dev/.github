@@ -25,6 +25,7 @@ Arquivos específicos de cada repositório sempre têm prioridade quando um proj
 | [`.github/FUNDING.yml`](.github/FUNDING.yml) | Configuração do GitHub Sponsors. |
 | [`.github/workflows/dotnet-sdk-sync.yml`](.github/workflows/dotnet-sdk-sync.yml) | Automação central que verifica arquivos `global.json` na raiz dos repositórios e abre Pull Requests de atualização do SDK quando aplicável. |
 | [`.github/workflows/dotnet-repository-inventory.yml`](.github/workflows/dotnet-repository-inventory.yml) | Automação central somente leitura que inventaria projetos .NET nos repositórios acessíveis à GitHub App configurada. |
+| [`.github/workflows/reusable-secret-scan.yml`](.github/workflows/reusable-secret-scan.yml) | Política reutilizável e agnóstica de linguagem para análise de secrets no histórico Git, aplicável a .NET e também a stacks futuras como Node.js, React, Java, Python, Go, Terraform, Kubernetes e Docker. |
 
 ## Como o GitHub utiliza este repositório
 
@@ -99,6 +100,32 @@ Os dois arquivos são enviados como artifact `dotnet-repository-inventory` com `
 
 Repositórios sem arquivos `.csproj` são contabilizados e não fazem a execução falhar. Problemas de clone ou inspeção em repositórios individuais reportados são registrados como warnings/status, e o relatório consolidado continua sendo produzido. O workflow reutiliza as credenciais existentes da GitHub App, solicita apenas permissões de leitura no GitHub Actions, ignora forks e repositórios arquivados, inspeciona somente a branch padrão, remove diretórios temporários de cada repositório após a inspeção e não escreve nos repositórios analisados.
 
+## Automação reutilizável de segurança
+
+### Análise de secrets
+
+O workflow [`reusable-secret-scan.yml`](.github/workflows/reusable-secret-scan.yml) fornece uma base reutilizável para análise de secrets, deliberadamente independente da linguagem da aplicação ou do sistema de build.
+
+Ele analisa o histórico Git com o Infisical CLI e pode ser usado tanto em repositórios .NET quanto em Node.js/React, Java/JVM, Python, Go, Terraform, Kubernetes, Docker, configurações de CI/CD e outras stacks futuras.
+
+A política de segurança é deliberadamente conservadora:
+
+- solicita apenas `contents: read` ao GitHub Actions;
+- não exige secrets do repositório e nunca compila ou executa código da aplicação;
+- evita `pull_request_target` e desabilita a persistência das credenciais do checkout;
+- realiza checkout do histórico Git completo para detectar credenciais commitadas além da árvore de trabalho atual;
+- fixa as dependências do GitHub Actions em commit SHAs imutáveis;
+- baixa uma versão fixa do Infisical CLI e valida seu checksum SHA-256 antes da execução;
+- remove os valores detectados da saída do scanner;
+- analisa apenas o intervalo de commits relevante do PR ou push quando esse intervalo é confiável, utilizando histórico completo como fallback;
+- faz o check falhar tanto quando encontra possíveis secrets quanto quando o scanner não conclui de forma confiável;
+- armazena apenas um relatório SARIF com valores ocultos e retenção de 3 dias;
+- impede que um Pull Request enfraqueça sua própria política em `.infisical-scan.toml` ou `.infisicalignore`, usando durante o scan as versões existentes na branch base.
+
+Falsos positivos devem ser revisados individualmente antes da inclusão de fingerprints ou exclusões. Uma credencial real deve primeiro ser revogada ou rotacionada; adicionar uma regra de ignore não é uma correção válida para um secret exposto.
+
+Os repositórios podem adotar essa política através de um pequeno caller workflow que referencia este workflow reutilizável por `workflow_call`. Consulte [`docs/secret-scanning.pt-BR.md`](docs/secret-scanning.pt-BR.md) para exemplos de adoção, cenários suportados, tratamento de falsos positivos e orientações de resposta a incidentes.
+
 ## Estrutura do repositório
 
 ```text
@@ -108,9 +135,13 @@ Repositórios sem arquivos `.csproj` são contabilizados e não fazem a execuç�
 │   ├── FUNDING.yml
 │   └── workflows/
 │       ├── dotnet-repository-inventory.yml
-│       └── dotnet-sdk-sync.yml
+│       ├── dotnet-sdk-sync.yml
+│       └── reusable-secret-scan.yml
 ├── .github.code-workspace
 ├── .gitignore
+├── docs/
+│   ├── secret-scanning.md
+│   └── secret-scanning.pt-BR.md
 ├── CONTRIBUTING.md
 ├── SECURITY.md
 ├── README.md
@@ -125,6 +156,7 @@ Este repositório segue alguns princípios simples:
 - **menor privilégio** — automações entre repositórios usam uma GitHub App com permissões restritas;
 - **revisão antes da alteração** — automações de manutenção abrem Pull Requests em vez de fazer merge direto;
 - **padrões seguros** — a automação de versões não realiza migrações implícitas de major/minor;
+- **defesa em profundidade** — checks reutilizáveis de segurança complementam controles específicos de cada repositório e os recursos de segurança nativos do GitHub;
 - **automação observável** — os resultados dos workflows são registrados nos logs, summaries e artifacts de curta duração quando dados estruturados são úteis.
 
 ## Contribuição

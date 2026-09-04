@@ -25,6 +25,7 @@ Repository-specific files always take precedence when a project needs different 
 | [`.github/FUNDING.yml`](.github/FUNDING.yml) | GitHub Sponsors configuration. |
 | [`.github/workflows/dotnet-sdk-sync.yml`](.github/workflows/dotnet-sdk-sync.yml) | Central automation that checks repository-root `global.json` files and opens SDK update Pull Requests when appropriate. |
 | [`.github/workflows/dotnet-repository-inventory.yml`](.github/workflows/dotnet-repository-inventory.yml) | Central read-only automation that inventories .NET projects across repositories accessible to the configured GitHub App. |
+| [`.github/workflows/reusable-secret-scan.yml`](.github/workflows/reusable-secret-scan.yml) | Reusable, language-agnostic Git-history secret scanning policy for .NET and future stacks such as Node.js, React, Java, Python, Go, Terraform, Kubernetes, and Docker. |
 
 ## How GitHub uses this repository
 
@@ -99,6 +100,32 @@ Both files are uploaded as the `dotnet-repository-inventory` artifact with `rete
 
 Repositories without `.csproj` files are counted and do not fail the run. Clone or inspection problems in individual reported repositories are recorded as warnings/status entries, and the consolidated report is still produced. The workflow uses the existing GitHub App credentials, requests only read permissions from GitHub Actions, ignores forks and archived repositories, inspects default branches only, removes per-repository temporary directories after inspection, and does not write to analyzed repositories.
 
+## Reusable security automation
+
+### Secret scanning
+
+The [`reusable-secret-scan.yml`](.github/workflows/reusable-secret-scan.yml) workflow provides a reusable secret-scanning baseline that is intentionally independent of application language or build system.
+
+It scans Git history with the Infisical CLI and is suitable for .NET repositories as well as Node.js/React, Java/JVM, Python, Go, Terraform, Kubernetes, Docker, CI/CD configuration, and future technology stacks.
+
+Its security policy is intentionally conservative:
+
+- requests only `contents: read` from GitHub Actions;
+- does not require repository secrets and never builds or executes application code;
+- avoids `pull_request_target` and disables persisted checkout credentials;
+- checks out full Git history so committed credentials can be detected beyond the current working tree;
+- pins GitHub Actions dependencies to immutable commit SHAs;
+- downloads a fixed Infisical CLI version and verifies its SHA-256 checksum before execution;
+- redacts detected values from scanner output;
+- scans only the relevant PR or push commit range when trustworthy and falls back to full-history scanning otherwise;
+- treats both detected secrets and scanner/tool failures as failing checks;
+- stores only a redacted SARIF report and retains it for 3 days;
+- prevents a Pull Request from weakening its own `.infisical-scan.toml` or `.infisicalignore` policy by using the base-branch versions during that PR scan.
+
+False positives should be narrowly reviewed before adding fingerprints or exclusions. A real credential must be revoked or rotated first; ignore rules are not an acceptable remediation for an exposed secret.
+
+Repositories can adopt the policy through a small caller workflow that references this reusable workflow with `workflow_call`. See [`docs/secret-scanning.md`](docs/secret-scanning.md) for adoption examples, supported scenarios, false-positive handling, and incident-response guidance.
+
 ## Repository structure
 
 ```text
@@ -108,9 +135,13 @@ Repositories without `.csproj` files are counted and do not fail the run. Clone 
 │   ├── FUNDING.yml
 │   └── workflows/
 │       ├── dotnet-repository-inventory.yml
-│       └── dotnet-sdk-sync.yml
+│       ├── dotnet-sdk-sync.yml
+│       └── reusable-secret-scan.yml
 ├── .github.code-workspace
 ├── .gitignore
+├── docs/
+│   ├── secret-scanning.md
+│   └── secret-scanning.pt-BR.md
 ├── CONTRIBUTING.md
 ├── SECURITY.md
 ├── README.md
@@ -125,6 +156,7 @@ This repository follows a few simple governance principles:
 - **least privilege** — cross-repository automation uses a GitHub App with scoped permissions;
 - **review before change** — maintenance automation opens Pull Requests instead of merging directly;
 - **safe defaults** — version-management automation avoids implicit major/minor migrations;
+- **defense in depth** — reusable security checks complement repository-specific controls and GitHub-native security features;
 - **observable automation** — workflow results are exposed through GitHub Actions logs, summaries, and short-lived artifacts when structured data is useful.
 
 ## Contributing

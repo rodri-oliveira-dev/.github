@@ -2,6 +2,9 @@
 
 [![Sync .NET SDK versions](https://github.com/rodri-oliveira-dev/.github/actions/workflows/dotnet-sdk-sync.yml/badge.svg)](https://github.com/rodri-oliveira-dev/.github/actions/workflows/dotnet-sdk-sync.yml)
 [![Inventory .NET repositories](https://github.com/rodri-oliveira-dev/.github/actions/workflows/dotnet-repository-inventory.yml/badge.svg)](https://github.com/rodri-oliveira-dev/.github/actions/workflows/dotnet-repository-inventory.yml)
+[![Agent governance validation](https://github.com/rodri-oliveira-dev/.github/actions/workflows/agent-governance-validation.yml/badge.svg)](https://github.com/rodri-oliveira-dev/.github/actions/workflows/agent-governance-validation.yml)
+[![Sync upstream agent skills](https://github.com/rodri-oliveira-dev/.github/actions/workflows/sync-agent-skills.yml/badge.svg)](https://github.com/rodri-oliveira-dev/.github/actions/workflows/sync-agent-skills.yml)
+[![Distribute managed agent skills](https://github.com/rodri-oliveira-dev/.github/actions/workflows/distribute-agent-skills.yml/badge.svg)](https://github.com/rodri-oliveira-dev/.github/actions/workflows/distribute-agent-skills.yml)
 
 Central repository for shared community standards and maintenance automation across repositories maintained under the `rodri-oliveira-dev` account.
 
@@ -9,9 +12,9 @@ Central repository for shared community standards and maintenance automation acr
 
 ## Purpose
 
-This repository provides a consistent baseline for contribution, security, funding, and selected repository-maintenance policies without duplicating the same configuration across multiple projects.
+This repository provides a consistent baseline for contribution, security, funding, selected repository-maintenance policies, and agent governance without duplicating the same configuration across multiple projects.
 
-Repository-specific files always take precedence when a project needs different rules, workflows, compatibility requirements, or support policies.
+Repository-specific files always take precedence when a project needs different rules, workflows, compatibility requirements, support policies, or local agent instructions.
 
 ## What is centralized here
 
@@ -26,7 +29,10 @@ Repository-specific files always take precedence when a project needs different 
 | [`.github/workflows/dotnet-sdk-sync.yml`](.github/workflows/dotnet-sdk-sync.yml) | Central automation that checks repository-root `global.json` files and opens SDK update Pull Requests when appropriate. |
 | [`.github/workflows/dotnet-repository-inventory.yml`](.github/workflows/dotnet-repository-inventory.yml) | Central read-only automation that inventories .NET projects across repositories accessible to the configured GitHub App. |
 | [`.github/workflows/reusable-secret-scan.yml`](.github/workflows/reusable-secret-scan.yml) | Reusable, language-agnostic Git-history secret scanning policy for .NET and future stacks such as Node.js, React, Java, Python, Go, Terraform, Kubernetes, and Docker. |
-| [`agent-governance/`](agent-governance/) | Versioned source of truth for reusable agent instructions, profiles, and skills. These files are distributed explicitly to consumer repositories; they are not inherited automatically. |
+| [`.github/workflows/agent-governance-validation.yml`](.github/workflows/agent-governance-validation.yml) | Deterministic validation for the central agent-governance registry, profile mappings, managed skills, and synchronization/distribution contracts. |
+| [`.github/workflows/sync-agent-skills.yml`](.github/workflows/sync-agent-skills.yml) | Weekly upstream synchronization of four allowlisted .NET skills from `dotnet-library-template` into the central registry through a reviewed Pull Request. |
+| [`.github/workflows/distribute-agent-skills.yml`](.github/workflows/distribute-agent-skills.yml) | Distributes approved managed skills from `.github/main` to public consumer repositories that already use them, opening one reviewed Pull Request per repository when drift exists. |
+| [`agent-governance/`](agent-governance/) | Versioned canonical registry for reusable agent instructions, profiles, and skills. These files are distributed explicitly to consumer repositories; they are not inherited automatically. |
 
 ## How GitHub uses this repository
 
@@ -43,7 +49,8 @@ Examples of repository-specific overrides include:
 - issue and Pull Request templates;
 - support policies;
 - codes of conduct;
-- build, testing, release, or compatibility requirements.
+- build, testing, release, or compatibility requirements;
+- repository-specific agent instructions and skills.
 
 ## Central .NET automations
 
@@ -129,11 +136,58 @@ Repositories can adopt the policy through a small caller workflow that reference
 
 ## Agent governance
 
-The [`agent-governance/`](agent-governance/) directory is the canonical authoring source for reusable agent instructions and Codex skills. The initial `dotnet-library` profile keeps persistent `AGENTS.md` policy compact and moves task-specific procedures into nine versioned skills.
+The [`agent-governance/`](agent-governance/) directory is the canonical registry for reusable agent instructions and Codex skills. The initial `dotnet-library` profile keeps persistent `AGENTS.md` policy compact and moves task-specific procedures into nine versioned skills.
 
-This repository acts as the authoring/versioning control plane only: other repositories do **not** inherit these files automatically. Adoption is explicit and repository-local authority is preserved. Governance version `1.0.0` is currently distributed manually; future synchronization may open reviewed update Pull Requests, but should not auto-merge them.
+Neither GitHub nor Codex implicitly inherits these files from the special `.github` repository. Consumer repositories keep local authority and opt in by storing the relevant files in their own trees.
 
-See [`docs/agent-governance.md`](docs/agent-governance.md) for the composition model, versioning rules, consumer flow, and enforcement boundaries.
+### Upstream skill synchronization
+
+Four .NET skills are currently upstream-owned by [`rodri-oliveira-dev/dotnet-library-template`](https://github.com/rodri-oliveira-dev/dotnet-library-template):
+
+- `dotnet-issue-implementation`;
+- `dotnet-bug-investigation`;
+- `dotnet-pr-review`;
+- `dotnet-security-review`.
+
+[`sync-agent-skills.yml`](.github/workflows/sync-agent-skills.yml) runs every Monday at 09:20 in `America/Sao_Paulo` (12:20 UTC) and can also be executed manually in `dry_run` mode or against an alternate source ref.
+
+The workflow synchronizes only those four allowlisted files, validates their required metadata, compares them byte-for-byte with the central registry, and creates or refreshes a single `chore/sync-upstream-agent-skills` Pull Request when drift is detected. New upstream skills are never imported implicitly and the Pull Request is never auto-merged.
+
+### Consumer distribution
+
+After a managed skill update is reviewed and merged into `.github/main`, [`distribute-agent-skills.yml`](.github/workflows/distribute-agent-skills.yml) runs automatically because its `push` trigger is scoped to the four managed skill paths.
+
+The distributor scans public repositories visible to the configured GitHub App and checks whether each repository already contains any managed skill under `.agents/skills/<skill>/SKILL.md`. Existing managed files are compared byte-for-byte with the approved central version.
+
+When drift exists, the workflow creates or refreshes a single `chore/sync-agent-governance` branch and opens one Pull Request per affected repository, even when several skills changed together. It does not install missing skills, does not modify `AGENTS.md`, does not auto-merge, and does not touch repository-specific files outside the four managed skill paths.
+
+Because this control repository is public, non-public repositories are skipped without exposing their names or metadata in public workflow output. Manual execution defaults to `dry_run: true` so distribution can be inspected without writing to consumer repositories.
+
+The resulting supply chain is deliberately review-gated:
+
+```text
+dotnet-library-template
+        |
+        | weekly upstream sync
+        v
+.github agent-governance registry
+        |
+        | validation + reviewed PR + merge
+        v
+.github/main
+        |
+        | managed-skill distribution
+        v
+consumer repositories
+        |
+        | repository CI + human review
+        v
+merge decision
+```
+
+[`agent-governance-validation.yml`](.github/workflows/agent-governance-validation.yml) validates the registry and the contracts of both synchronization workflows so the allowlist, mappings, review boundaries, and non-auto-merge behavior remain explicit.
+
+See [`docs/agent-governance.md`](docs/agent-governance.md) for the composition model, versioning rules, synchronization/distribution flow, and enforcement boundaries.
 
 ## Repository structure
 
@@ -144,9 +198,11 @@ See [`docs/agent-governance.md`](docs/agent-governance.md) for the composition m
 │   ├── FUNDING.yml
 │   └── workflows/
 │       ├── agent-governance-validation.yml
+│       ├── distribute-agent-skills.yml
 │       ├── dotnet-repository-inventory.yml
 │       ├── dotnet-sdk-sync.yml
-│       └── reusable-secret-scan.yml
+│       ├── reusable-secret-scan.yml
+│       └── sync-agent-skills.yml
 ├── .github.code-workspace
 ├── .gitignore
 ├── agent-governance/
@@ -171,8 +227,8 @@ This repository follows a few simple governance principles:
 
 - **shared defaults, local authority** — repository-specific configuration wins when present;
 - **least privilege** — cross-repository automation uses a GitHub App with scoped permissions;
-- **review before change** — maintenance automation opens Pull Requests instead of merging directly;
-- **safe defaults** — version-management automation avoids implicit major/minor migrations;
+- **review before change** — maintenance and agent-governance automation opens Pull Requests instead of merging directly;
+- **safe defaults** — version-management automation avoids implicit major/minor migrations and manual agent distribution defaults to dry-run;
 - **defense in depth** — reusable security checks complement repository-specific controls and GitHub-native security features;
 - **observable automation** — workflow results are exposed through GitHub Actions logs, summaries, and short-lived artifacts when structured data is useful;
 - **agent guidance, deterministic enforcement** — `AGENTS.md` and skills guide agents while CI, analyzers, scanners, and quality gates decide what is acceptable.

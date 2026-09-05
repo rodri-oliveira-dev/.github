@@ -1,6 +1,6 @@
 # Agent governance
 
-This directory is the canonical authoring source for reusable agent instructions and skills shared across repositories maintained under `rodri-oliveira-dev`.
+This directory is the canonical registry and distribution source for reusable agent instructions and skills shared across repositories maintained under `rodri-oliveira-dev`.
 
 It is intentionally separate from repository-local runtime files. Neither GitHub nor Codex automatically inherits `AGENTS.md` or `.agents/skills` from the special `.github` repository. A consumer repository must materialize the selected profile into its own tree.
 
@@ -57,9 +57,26 @@ The profile is the distributable contract. Repository-local instructions may ext
 
 A consumer should update governance through a reviewed Pull Request. Do not auto-merge governance changes.
 
+## Upstream-owned skills
+
+Four .NET skills are intentionally owned by `rodri-oliveira-dev/dotnet-library-template` and mirrored into this registry:
+
+- `dotnet-issue-implementation`;
+- `dotnet-bug-investigation`;
+- `dotnet-pr-review`;
+- `dotnet-security-review`.
+
+`.github/workflows/sync-agent-skills.yml` checks the upstream `main` branch every Monday at 09:20 `America/Sao_Paulo` (12:20 UTC). The workflow can also be run manually with an alternate source ref for validation.
+
+Synchronization is allowlist-based and byte-for-byte. The workflow does not discover new skills automatically. When drift exists, it creates or updates the automation-owned branch `chore/sync-upstream-agent-skills` and opens a reviewed Pull Request. Auto-merge is intentionally disabled.
+
+Changes to these four mirrored files should normally be authored in the upstream repository. A direct central edit can be replaced by the next synchronization run if it differs from upstream.
+
+Other canonical skills remain centrally maintained unless their ownership is explicitly changed in a reviewed governance update.
+
 ## Distribution
 
-Distribution is deliberately manual in this first stage. The repository is now the source of truth, but no cross-repository sync workflow is enabled yet.
+Distribution from this registry to consumer repositories remains deliberately manual in this stage. Upstream ingestion of the four allowlisted skills is automated, but consumer repositories are not updated automatically.
 
 Future automation may read `profile.yml`, compare the selected version with consumer repositories, and open update Pull Requests. It should never treat this repository as an implicit runtime inheritance mechanism.
 

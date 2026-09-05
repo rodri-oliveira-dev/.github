@@ -6,6 +6,7 @@ on:
       - "agent-governance/**"
       - "docs/agent-governance*.md"
       - ".github/workflows/agent-governance-validation.yml"
+      - ".github/workflows/sync-agent-skills.yml"
       - "README.md"
       - "README.pt-BR.md"
   push:
@@ -15,6 +16,7 @@ on:
       - "agent-governance/**"
       - "docs/agent-governance*.md"
       - ".github/workflows/agent-governance-validation.yml"
+      - ".github/workflows/sync-agent-skills.yml"
       - "README.md"
       - "README.pt-BR.md"
 
@@ -62,6 +64,7 @@ jobs:
             agent-governance/skills/dotnet/test-anti-patterns/SKILL.md
             agent-governance/skills/dotnet-library/dotnet-library-change/SKILL.md
             agent-governance/skills/dotnet-library/ci-release-governance/SKILL.md
+            .github/workflows/sync-agent-skills.yml
           )
 
           for file in "${required[@]}"; do
@@ -142,3 +145,28 @@ jobs:
               exit 1
             fi
           done < <(sed -n 's/^  - source: //p' "$profile")
+
+      - name: Validate upstream skill sync contract
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          sync=".github/workflows/sync-agent-skills.yml"
+
+          grep -Fq 'cron: "20 12 * * 1"' "$sync"
+          grep -Fq 'SOURCE_REPO: rodri-oliveira-dev/dotnet-library-template' "$sync"
+          grep -Fq 'readonly SYNC_BRANCH="chore/sync-upstream-agent-skills"' "$sync"
+          grep -Fq 'gh pr create' "$sync"
+          grep -Fq 'git push --force-with-lease' "$sync"
+
+          managed=(
+            dotnet-issue-implementation
+            dotnet-bug-investigation
+            dotnet-pr-review
+            dotnet-security-review
+          )
+
+          for skill in "${managed[@]}"; do
+            grep -Fq ".agents/skills/$skill/SKILL.md" "$sync"
+            grep -Fq "agent-governance/skills/dotnet/$skill/SKILL.md" "$sync"
+          done

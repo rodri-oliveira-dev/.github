@@ -1,0 +1,203 @@
+name: Agent governance validation
+
+on:
+  pull_request:
+    paths:
+      - "agent-governance/**"
+      - "docs/agent-governance*.md"
+      - ".github/workflows/agent-governance-validation.yml"
+      - ".github/workflows/sync-agent-skills.yml"
+      - ".github/workflows/distribute-agent-skills.yml"
+      - "README.md"
+      - "README.pt-BR.md"
+  push:
+    branches:
+      - main
+    paths:
+      - "agent-governance/**"
+      - "docs/agent-governance*.md"
+      - ".github/workflows/agent-governance-validation.yml"
+      - ".github/workflows/sync-agent-skills.yml"
+      - ".github/workflows/distribute-agent-skills.yml"
+      - "README.md"
+      - "README.pt-BR.md"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: agent-governance-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Validate governance source
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Validate version and required files
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          version="$(tr -d '[:space:]' < agent-governance/VERSION)"
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::agent-governance/VERSION must use MAJOR.MINOR.PATCH."
+            exit 1
+          fi
+
+          required=(
+            agent-governance/README.md
+            agent-governance/base/AGENTS.base.md
+            agent-governance/profiles/dotnet-library/AGENTS.md
+            agent-governance/profiles/dotnet-library/profile.yml
+            agent-governance/skills/dotnet/dotnet-issue-implementation/SKILL.md
+            agent-governance/skills/dotnet/dotnet-bug-investigation/SKILL.md
+            agent-governance/skills/dotnet/dotnet-pr-review/SKILL.md
+            agent-governance/skills/dotnet/dotnet-security-review/SKILL.md
+            agent-governance/skills/dotnet/dotnet-refactoring-engineer/SKILL.md
+            agent-governance/skills/dotnet/coverage-analysis/SKILL.md
+            agent-governance/skills/dotnet/test-anti-patterns/SKILL.md
+            agent-governance/skills/dotnet-library/dotnet-library-change/SKILL.md
+            agent-governance/skills/dotnet-library/ci-release-governance/SKILL.md
+            .github/workflows/sync-agent-skills.yml
+            .github/workflows/distribute-agent-skills.yml
+          )
+
+          for file in "${required[@]}"; do
+            if [[ ! -s "$file" ]]; then
+              echo "::error::$file is missing or empty."
+              exit 1
+            fi
+          done
+
+      - name: Validate skill metadata
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          mapfile -t skills < <(find agent-governance/skills -type f -name SKILL.md | sort)
+          if [[ "${#skills[@]}" -ne 9 ]]; then
+            echo "::error::Expected 9 canonical skills, found ${#skills[@]}."
+            exit 1
+          fi
+
+          declare -A names=()
+          for file in "${skills[@]}"; do
+            if [[ "$(head -n 1 "$file")" != "---" ]]; then
+              echo "::error::$file must start with YAML frontmatter."
+              exit 1
+            fi
+
+            name="$(sed -n 's/^name: //p' "$file" | head -n 1)"
+            description="$(sed -n 's/^description: //p' "$file" | head -n 1)"
+            license="$(sed -n 's/^license: //p' "$file" | head -n 1)"
+
+            if [[ ! "$name" =~ ^[a-z0-9][a-z0-9-]*$ ]]; then
+              echo "::error::$file has invalid or missing skill name."
+              exit 1
+            fi
+            if [[ -z "$description" ]]; then
+              echo "::error::$file is missing description."
+              exit 1
+            fi
+            if [[ "$license" != "MIT" ]]; then
+              echo "::error::$file must declare license: MIT."
+              exit 1
+            fi
+            if [[ -n "${names[$name]:-}" ]]; then
+              echo "::error::Duplicate skill name: $name."
+              exit 1
+            fi
+            names[$name]="$file"
+          done
+
+      - name: Validate dotnet-library profile
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          version="$(tr -d '[:space:]' < agent-governance/VERSION)"
+          profile="agent-governance/profiles/dotnet-library/profile.yml"
+          agents="agent-governance/profiles/dotnet-library/AGENTS.md"
+
+          grep -Fxq "profile: dotnet-library" "$profile"
+          grep -Fxq "governance_version: $version" "$profile"
+          grep -Fxq "  current_mode: manual" "$profile"
+          grep -Fxq "  auto_merge: false" "$profile"
+
+          grep -Fq "## Gerenciamento de contexto" "$agents"
+          grep -Fq "350 linhas" "$agents"
+          grep -Fq "## Roteamento de tarefas e delegação" "$agents"
+          grep -Fq "Validação determinística prevalece" "$agents"
+          grep -Fq "dotnet restore --locked-mode" "$agents"
+          grep -Fq "dotnet build --configuration Release --no-restore" "$agents"
+          grep -Fq "dotnet test --configuration Release --no-build" "$agents"
+
+          while IFS= read -r source; do
+            resolved="$(realpath -m "agent-governance/profiles/dotnet-library/$source")"
+            root="$(realpath agent-governance)"
+            if [[ "$resolved" != "$root"/* ]] || [[ ! -s "$resolved" ]]; then
+              echo "::error::Profile references missing or invalid source: $source"
+              exit 1
+            fi
+          done < <(sed -n 's/^  - source: //p' "$profile")
+
+      - name: Validate upstream skill sync contract
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          sync=".github/workflows/sync-agent-skills.yml"
+
+          grep -Fq 'cron: "20 12 * * 1"' "$sync"
+          grep -Fq 'SOURCE_REPO: rodri-oliveira-dev/dotnet-library-template' "$sync"
+          grep -Fq 'readonly SYNC_BRANCH="chore/sync-upstream-agent-skills"' "$sync"
+          grep -Fq 'gh pr create' "$sync"
+          grep -Fq 'git push --force-with-lease' "$sync"
+
+          managed=(
+            dotnet-issue-implementation
+            dotnet-bug-investigation
+            dotnet-pr-review
+            dotnet-security-review
+          )
+
+          for skill in "${managed[@]}"; do
+            grep -Fq ".agents/skills/$skill/SKILL.md" "$sync"
+            grep -Fq "agent-governance/skills/dotnet/$skill/SKILL.md" "$sync"
+          done
+
+      - name: Validate consumer distribution contract
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          distribution=".github/workflows/distribute-agent-skills.yml"
+
+          grep -Fq 'readonly SYNC_BRANCH="chore/sync-agent-governance"' "$distribution"
+          grep -Fq 'permission-contents: write' "$distribution"
+          grep -Fq 'permission-pull-requests: write' "$distribution"
+          grep -Fq '[[ "$visibility" != "public" ]]' "$distribution"
+          grep -Fq 'gh pr create' "$distribution"
+          grep -Fq -- '--force-with-lease=' "$distribution"
+          grep -Fq 'Missing skills are not installed automatically.' "$distribution"
+
+          managed=(
+            dotnet-issue-implementation
+            dotnet-bug-investigation
+            dotnet-pr-review
+            dotnet-security-review
+          )
+
+          for skill in "${managed[@]}"; do
+            grep -Fq "agent-governance/skills/dotnet/$skill/**" "$distribution"
+            grep -Fq "agent-governance/skills/dotnet/$skill/SKILL.md" "$distribution"
+            grep -Fq ".agents/skills/$skill/SKILL.md" "$distribution"
+          done

@@ -7,6 +7,7 @@ on:
       - "docs/agent-governance*.md"
       - ".github/workflows/agent-governance-validation.yml"
       - ".github/workflows/sync-agent-skills.yml"
+      - ".github/workflows/distribute-agent-skills.yml"
       - "README.md"
       - "README.pt-BR.md"
   push:
@@ -17,6 +18,7 @@ on:
       - "docs/agent-governance*.md"
       - ".github/workflows/agent-governance-validation.yml"
       - ".github/workflows/sync-agent-skills.yml"
+      - ".github/workflows/distribute-agent-skills.yml"
       - "README.md"
       - "README.pt-BR.md"
 
@@ -65,6 +67,7 @@ jobs:
             agent-governance/skills/dotnet-library/dotnet-library-change/SKILL.md
             agent-governance/skills/dotnet-library/ci-release-governance/SKILL.md
             .github/workflows/sync-agent-skills.yml
+            .github/workflows/distribute-agent-skills.yml
           )
 
           for file in "${required[@]}"; do
@@ -169,4 +172,32 @@ jobs:
           for skill in "${managed[@]}"; do
             grep -Fq ".agents/skills/$skill/SKILL.md" "$sync"
             grep -Fq "agent-governance/skills/dotnet/$skill/SKILL.md" "$sync"
+          done
+
+      - name: Validate consumer distribution contract
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          distribution=".github/workflows/distribute-agent-skills.yml"
+
+          grep -Fq 'readonly SYNC_BRANCH="chore/sync-agent-governance"' "$distribution"
+          grep -Fq 'permission-contents: write' "$distribution"
+          grep -Fq 'permission-pull-requests: write' "$distribution"
+          grep -Fq '[[ "$visibility" != "public" ]]' "$distribution"
+          grep -Fq 'gh pr create' "$distribution"
+          grep -Fq -- '--force-with-lease=' "$distribution"
+          grep -Fq 'Missing skills are not installed automatically.' "$distribution"
+
+          managed=(
+            dotnet-issue-implementation
+            dotnet-bug-investigation
+            dotnet-pr-review
+            dotnet-security-review
+          )
+
+          for skill in "${managed[@]}"; do
+            grep -Fq "agent-governance/skills/dotnet/$skill/**" "$distribution"
+            grep -Fq "agent-governance/skills/dotnet/$skill/SKILL.md" "$distribution"
+            grep -Fq ".agents/skills/$skill/SKILL.md" "$distribution"
           done

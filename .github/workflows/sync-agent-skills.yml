@@ -67,14 +67,25 @@ jobs:
             "dotnet-security-review|.agents/skills/dotnet-security-review/SKILL.md|agent-governance/skills/dotnet/dotnet-security-review/SKILL.md"
           )
 
-          source_sha="$(gh api "repos/$SOURCE_REPO/commits/$SOURCE_REF" --jq '.sha')"
+          source_sha="$(
+            gh api \
+              --method GET \
+              "repos/$SOURCE_REPO/commits" \
+              -f sha="$SOURCE_REF" \
+              -f per_page=1 \
+              --jq '.[0].sha // empty'
+          )"
+
+          if [[ -z "$source_sha" ]]; then
+            echo "::error title=Unknown upstream ref::$SOURCE_REPO does not resolve ref '$SOURCE_REF'."
+            exit 1
+          fi
 
           git fetch origin main --prune
           git fetch origin "+refs/heads/$SYNC_BRANCH:refs/remotes/origin/$SYNC_BRANCH" 2>/dev/null || true
           git checkout -B "$SYNC_BRANCH" origin/main
 
           declare -a target_files=()
-          declare -a skill_names=()
 
           for mapping in "${mappings[@]}"; do
             IFS='|' read -r expected_name source_path target_path <<< "$mapping"
@@ -131,7 +142,6 @@ jobs:
 
             mv "$temp_file" "$target_path"
             target_files+=("$target_path")
-            skill_names+=("$expected_name")
           done
 
           git diff --check

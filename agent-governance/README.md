@@ -74,11 +74,42 @@ Changes to these four mirrored files should normally be authored in the upstream
 
 Other canonical skills remain centrally maintained unless their ownership is explicitly changed in a reviewed governance update.
 
-## Distribution
+## Consumer distribution
 
-Distribution from this registry to consumer repositories remains deliberately manual in this stage. Upstream ingestion of the four allowlisted skills is automated, but consumer repositories are not updated automatically.
+After an upstream synchronization Pull Request is reviewed and merged into `main`, `.github/workflows/distribute-agent-skills.yml` is triggered by changes to the four managed canonical skill paths. It can also be invoked manually in dry-run mode.
 
-Future automation may read `profile.yml`, compare the selected version with consumer repositories, and open update Pull Requests. It should never treat this repository as an implicit runtime inheritance mechanism.
+The distributor enumerates public repositories visible to the configured GitHub App and inspects only these existing consumer paths:
+
+- `.agents/skills/dotnet-issue-implementation/SKILL.md`;
+- `.agents/skills/dotnet-bug-investigation/SKILL.md`;
+- `.agents/skills/dotnet-pr-review/SKILL.md`;
+- `.agents/skills/dotnet-security-review/SKILL.md`.
+
+A skill is considered managed only when that path already exists on the consumer repository's default branch. The workflow never installs a missing skill automatically.
+
+For repositories with drift, the canonical file is copied byte-for-byte and the automation creates or refreshes the branch `chore/sync-agent-governance`. One Pull Request is maintained per repository even when several managed skills changed. Auto-merge is disabled, so repository CI and human review remain the merge authority.
+
+Because this control repository is public, non-public repositories are deliberately skipped to avoid exposing their names or metadata through public workflow logs or summaries. Private-repository distribution should run from a private control plane if it is introduced later.
+
+The resulting chain is intentionally review-gated:
+
+```text
+dotnet-library-template
+        |
+        | weekly upstream sync PR
+        v
+.github/agent-governance
+        |
+        | reviewed merge to main
+        v
+consumer distribution workflow
+        |
+        +--> consumer A update PR
+        +--> consumer B update PR
+        +--> consumer C already current
+```
+
+Full profile and `AGENTS.md` distribution remains manual for now. Only the four explicitly managed skills participate in automatic consumer distribution.
 
 ## Local authority
 

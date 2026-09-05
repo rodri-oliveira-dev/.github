@@ -1,0 +1,34 @@
+schema_version: 1
+profile: dotnet-library
+governance_version: 1.0.0
+status: active
+
+agents:
+  source: AGENTS.md
+  target: AGENTS.md
+
+skills:
+  - source: ../../skills/dotnet/dotnet-issue-implementation/SKILL.md
+    target: .agents/skills/dotnet-issue-implementation/SKILL.md
+  - source: ../../skills/dotnet/dotnet-bug-investigation/SKILL.md
+    target: .agents/skills/dotnet-bug-investigation/SKILL.md
+  - source: ../../skills/dotnet/dotnet-pr-review/SKILL.md
+    target: .agents/skills/dotnet-pr-review/SKILL.md
+  - source: ../../skills/dotnet/dotnet-security-review/SKILL.md
+    target: .agents/skills/dotnet-security-review/SKILL.md
+  - source: ../../skills/dotnet/dotnet-refactoring-engineer/SKILL.md
+    target: .agents/skills/dotnet-refactoring-engineer/SKILL.md
+  - source: ../../skills/dotnet/coverage-analysis/SKILL.md
+    target: .agents/skills/coverage-analysis/SKILL.md
+  - source: ../../skills/dotnet/test-anti-patterns/SKILL.md
+    target: .agents/skills/test-anti-patterns/SKILL.md
+  - source: ../../skills/dotnet-library/dotnet-library-change/SKILL.md
+    target: .agents/skills/dotnet-library-change/SKILL.md
+  - source: ../../skills/dotnet-library/ci-release-governance/SKILL.md
+    target: .agents/skills/ci-release-governance/SKILL.md
+
+distribution:
+  current_mode: manual
+  future_mode: pull-request
+  auto_merge: false
+  local_authority: true

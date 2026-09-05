@@ -26,6 +26,7 @@ Repository-specific files always take precedence when a project needs different 
 | [`.github/workflows/dotnet-sdk-sync.yml`](.github/workflows/dotnet-sdk-sync.yml) | Central automation that checks repository-root `global.json` files and opens SDK update Pull Requests when appropriate. |
 | [`.github/workflows/dotnet-repository-inventory.yml`](.github/workflows/dotnet-repository-inventory.yml) | Central read-only automation that inventories .NET projects across repositories accessible to the configured GitHub App. |
 | [`.github/workflows/reusable-secret-scan.yml`](.github/workflows/reusable-secret-scan.yml) | Reusable, language-agnostic Git-history secret scanning policy for .NET and future stacks such as Node.js, React, Java, Python, Go, Terraform, Kubernetes, and Docker. |
+| [`agent-governance/`](agent-governance/) | Versioned source of truth for reusable agent instructions, profiles, and skills. These files are distributed explicitly to consumer repositories; they are not inherited automatically. |
 
 ## How GitHub uses this repository
 
@@ -126,6 +127,14 @@ False positives should be narrowly reviewed before adding fingerprints or exclus
 
 Repositories can adopt the policy through a small caller workflow that references this reusable workflow with `workflow_call`. See [`docs/secret-scanning.md`](docs/secret-scanning.md) for adoption examples, supported scenarios, false-positive handling, and incident-response guidance.
 
+## Agent governance
+
+The [`agent-governance/`](agent-governance/) directory is the canonical authoring source for reusable agent instructions and Codex skills. The initial `dotnet-library` profile keeps persistent `AGENTS.md` policy compact and moves task-specific procedures into nine versioned skills.
+
+This repository acts as the authoring/versioning control plane only: other repositories do **not** inherit these files automatically. Adoption is explicit and repository-local authority is preserved. Governance version `1.0.0` is currently distributed manually; future synchronization may open reviewed update Pull Requests, but should not auto-merge them.
+
+See [`docs/agent-governance.md`](docs/agent-governance.md) for the composition model, versioning rules, consumer flow, and enforcement boundaries.
+
 ## Repository structure
 
 ```text
@@ -134,12 +143,20 @@ Repositories can adopt the policy through a small caller workflow that reference
 ├── .github/
 │   ├── FUNDING.yml
 │   └── workflows/
+│       ├── agent-governance-validation.yml
 │       ├── dotnet-repository-inventory.yml
 │       ├── dotnet-sdk-sync.yml
 │       └── reusable-secret-scan.yml
 ├── .github.code-workspace
 ├── .gitignore
+├── agent-governance/
+│   ├── VERSION
+│   ├── base/
+│   ├── profiles/
+│   └── skills/
 ├── docs/
+│   ├── agent-governance.md
+│   ├── agent-governance.pt-BR.md
 │   ├── secret-scanning.md
 │   └── secret-scanning.pt-BR.md
 ├── CONTRIBUTING.md
@@ -157,7 +174,8 @@ This repository follows a few simple governance principles:
 - **review before change** — maintenance automation opens Pull Requests instead of merging directly;
 - **safe defaults** — version-management automation avoids implicit major/minor migrations;
 - **defense in depth** — reusable security checks complement repository-specific controls and GitHub-native security features;
-- **observable automation** — workflow results are exposed through GitHub Actions logs, summaries, and short-lived artifacts when structured data is useful.
+- **observable automation** — workflow results are exposed through GitHub Actions logs, summaries, and short-lived artifacts when structured data is useful;
+- **agent guidance, deterministic enforcement** — `AGENTS.md` and skills guide agents while CI, analyzers, scanners, and quality gates decide what is acceptable.
 
 ## Contributing
 
@@ -175,4 +193,4 @@ Do not report sensitive security issues through public GitHub issues.
 
 These defaults primarily support the open-source repositories and packages I maintain, with particular emphasis on the .NET ecosystem.
 
-Individual repositories may define additional architecture, CI/CD, testing, packaging, compatibility, release, or operational requirements.
+Individual repositories may define additional architecture, CI/CD, testing, packaging, compatibility, release, operational, or agent-governance requirements.

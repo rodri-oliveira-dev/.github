@@ -26,6 +26,7 @@ Arquivos específicos de cada repositório sempre têm prioridade quando um proj
 | [`.github/workflows/dotnet-sdk-sync.yml`](.github/workflows/dotnet-sdk-sync.yml) | Automação central que verifica arquivos `global.json` na raiz dos repositórios e abre Pull Requests de atualização do SDK quando aplicável. |
 | [`.github/workflows/dotnet-repository-inventory.yml`](.github/workflows/dotnet-repository-inventory.yml) | Automação central somente leitura que inventaria projetos .NET nos repositórios acessíveis à GitHub App configurada. |
 | [`.github/workflows/reusable-secret-scan.yml`](.github/workflows/reusable-secret-scan.yml) | Política reutilizável e agnóstica de linguagem para análise de secrets no histórico Git, aplicável a .NET e também a stacks futuras como Node.js, React, Java, Python, Go, Terraform, Kubernetes e Docker. |
+| [`agent-governance/`](agent-governance/) | Fonte versionada de verdade para instruções, perfis e skills reutilizáveis de agentes. Esses arquivos são distribuídos explicitamente aos repositórios consumidores; não são herdados automaticamente. |
 
 ## Como o GitHub utiliza este repositório
 
@@ -126,6 +127,14 @@ Falsos positivos devem ser revisados individualmente antes da inclusão de finge
 
 Os repositórios podem adotar essa política através de um pequeno caller workflow que referencia este workflow reutilizável por `workflow_call`. Consulte [`docs/secret-scanning.pt-BR.md`](docs/secret-scanning.pt-BR.md) para exemplos de adoção, cenários suportados, tratamento de falsos positivos e orientações de resposta a incidentes.
 
+## Governança de agentes
+
+O diretório [`agent-governance/`](agent-governance/) é a fonte canônica de autoria para instruções reutilizáveis de agentes e skills do Codex. O perfil inicial `dotnet-library` mantém a policy persistente do `AGENTS.md` compacta e move procedimentos específicos de tarefa para nove skills versionadas.
+
+Este repositório funciona apenas como control plane de autoria/versionamento: os outros repositórios **não** herdam esses arquivos automaticamente. A adoção é explícita e a autoridade local de cada projeto é preservada. A versão de governança `1.0.0` é distribuída manualmente neste primeiro estágio; uma sincronização futura poderá abrir Pull Requests revisáveis, mas não deve fazer auto-merge.
+
+Consulte [`docs/agent-governance.pt-BR.md`](docs/agent-governance.pt-BR.md) para o modelo de composição, regras de versionamento, fluxo dos consumidores e limites de enforcement.
+
 ## Estrutura do repositório
 
 ```text
@@ -134,12 +143,20 @@ Os repositórios podem adotar essa política através de um pequeno caller workf
 ├── .github/
 │   ├── FUNDING.yml
 │   └── workflows/
+│       ├── agent-governance-validation.yml
 │       ├── dotnet-repository-inventory.yml
 │       ├── dotnet-sdk-sync.yml
 │       └── reusable-secret-scan.yml
 ├── .github.code-workspace
 ├── .gitignore
+├── agent-governance/
+│   ├── VERSION
+│   ├── base/
+│   ├── profiles/
+│   └── skills/
 ├── docs/
+│   ├── agent-governance.md
+│   ├── agent-governance.pt-BR.md
 │   ├── secret-scanning.md
 │   └── secret-scanning.pt-BR.md
 ├── CONTRIBUTING.md
@@ -157,7 +174,8 @@ Este repositório segue alguns princípios simples:
 - **revisão antes da alteração** — automações de manutenção abrem Pull Requests em vez de fazer merge direto;
 - **padrões seguros** — a automação de versões não realiza migrações implícitas de major/minor;
 - **defesa em profundidade** — checks reutilizáveis de segurança complementam controles específicos de cada repositório e os recursos de segurança nativos do GitHub;
-- **automação observável** — os resultados dos workflows são registrados nos logs, summaries e artifacts de curta duração quando dados estruturados são úteis.
+- **automação observável** — os resultados dos workflows são registrados nos logs, summaries e artifacts de curta duração quando dados estruturados são úteis;
+- **orientação por agentes, enforcement determinístico** — `AGENTS.md` e skills orientam agentes enquanto CI, analyzers, scanners e quality gates decidem o que é aceitável.
 
 ## Contribuição
 
@@ -175,4 +193,4 @@ Não reporte vulnerabilidades sensíveis por meio de issues públicas do GitHub.
 
 Esses padrões atendem principalmente aos repositórios e pacotes open source que mantenho, com ênfase especial no ecossistema .NET.
 
-Cada repositório pode definir requisitos adicionais de arquitetura, CI/CD, testes, empacotamento, compatibilidade, release ou operação.
+Cada repositório pode definir requisitos adicionais de arquitetura, CI/CD, testes, empacotamento, compatibilidade, release, operação ou governança de agentes.

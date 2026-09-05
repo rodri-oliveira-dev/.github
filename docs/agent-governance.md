@@ -6,7 +6,7 @@ The `agent-governance/` directory is the canonical authoring source for reusable
 
 The special GitHub `.github` repository does not make `AGENTS.md` or `.agents/skills` automatically available to Codex in other repositories. A consumer must copy/materialize the selected profile into its own repository.
 
-This is therefore a **control plane for authoring and versioning**, not a hidden runtime inheritance mechanism.
+This is therefore a **control plane for authoring, versioning, validation, and reviewed distribution**, not a hidden runtime inheritance mechanism.
 
 ## Layers
 
@@ -42,6 +42,13 @@ Skills keep task-specific procedures out of the persistent `AGENTS.md` context.
 
 The initial catalog is split between reusable .NET skills and library-specific skills. Nine skills are included in governance version `1.0.0`.
 
+Four skills are mirrored byte-for-byte from `rodri-oliveira-dev/dotnet-library-template` by `.github/workflows/sync-agent-skills.yml`:
+
+- `dotnet-issue-implementation`;
+- `dotnet-bug-investigation`;
+- `dotnet-pr-review`;
+- `dotnet-security-review`.
+
 ## Versioning
 
 The governance contract version lives in `agent-governance/VERSION` and follows semantic versioning.
@@ -52,32 +59,39 @@ Do not auto-merge governance changes.
 
 ## Consumer update flow
 
-The intended flow is:
+The automated path for the four managed skills is:
 
 ```text
+dotnet-library-template
+        |
+        | weekly synchronization PR
+        v
 .github/agent-governance
         |
-        | canonical version
+        | review + validation + merge
         v
-compare selected profile
+distribute-agent-skills.yml
         |
-        v
-consumer repository
-        |
-        v
-reviewed Pull Request
-        |
-        v
-AGENTS.md + .agents/skills
+        +--> consumer repository PR
+        +--> consumer repository PR
+        +--> already-current repository
 ```
 
-The first implementation stage is manual. Cross-repository synchronization or drift detection can be added later, once the governance contract has proven stable.
+`.github/workflows/distribute-agent-skills.yml` runs after a managed canonical skill changes on `main` and can also be executed manually in dry-run mode.
+
+The workflow enumerates public repositories visible to the configured GitHub App. A consumer participates only for a managed skill that already exists under its `.agents/skills/<skill>/SKILL.md` path. Missing skills are not installed automatically.
+
+When drift exists, the canonical file replaces the consumer copy byte-for-byte on the automation-owned branch `chore/sync-agent-governance`. One reviewed Pull Request is created or refreshed per repository, regardless of how many managed skills changed. Auto-merge remains disabled.
+
+Because the `.github` control repository is public, non-public repositories are skipped so their names and metadata cannot leak through public workflow logs or summaries.
+
+Full profile and `AGENTS.md` synchronization remains manual at this stage.
 
 ## Local authority
 
 A shared profile is a baseline, not a replacement for repository knowledge. Consumer repositories may extend or override it for architecture, domain behavior, test/build commands, release processes, security boundaries, compatibility rules, or project-specific skills.
 
-The actual repository tree and its local contract remain authoritative.
+The actual repository tree and its local contract remain authoritative. For automatically managed skills, local divergence is surfaced as a Pull Request rather than overwritten on the default branch.
 
 ## Enforcement model
 
@@ -100,4 +114,4 @@ The centralized governance must never be used as a reason to remove or bypass CI
 
 ## Validation
 
-`.github/workflows/agent-governance-validation.yml` validates the canonical version, required profile files, skill frontmatter, duplicate skill names, profile references, and key context/validation rules in the .NET library profile.
+`.github/workflows/agent-governance-validation.yml` validates the canonical version, required profile files, skill frontmatter, duplicate skill names, profile references, key context/validation rules, and the upstream/distribution workflow contracts.

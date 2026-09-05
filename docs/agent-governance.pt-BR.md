@@ -6,7 +6,7 @@ O diretório `agent-governance/` é a fonte canônica de autoria para instruçõ
 
 O repositório especial `.github` do GitHub não faz com que `AGENTS.md` ou `.agents/skills` fiquem automaticamente disponíveis ao Codex nos outros repositórios. Um consumidor precisa copiar/materializar o perfil selecionado em sua própria árvore.
 
-Portanto, isto é um **control plane de autoria e versionamento**, não um mecanismo oculto de herança em runtime.
+Portanto, isto é um **control plane de autoria, versionamento, validação e distribuição revisada**, não um mecanismo oculto de herança em runtime.
 
 ## Camadas
 
@@ -42,6 +42,13 @@ Skills mantêm procedimentos específicos de tarefa fora do contexto persistente
 
 O catálogo inicial é separado entre skills reutilizáveis de .NET e skills específicas de bibliotecas. A versão de governança `1.0.0` inclui nove skills.
 
+Quatro skills são espelhadas byte-for-byte a partir de `rodri-oliveira-dev/dotnet-library-template` pelo workflow `.github/workflows/sync-agent-skills.yml`:
+
+- `dotnet-issue-implementation`;
+- `dotnet-bug-investigation`;
+- `dotnet-pr-review`;
+- `dotnet-security-review`.
+
 ## Versionamento
 
 A versão do contrato fica em `agent-governance/VERSION` e segue versionamento semântico.
@@ -52,32 +59,39 @@ Não faça auto-merge de mudanças de governança.
 
 ## Fluxo de atualização de consumidores
 
-O fluxo esperado é:
+O caminho automatizado para as quatro skills gerenciadas é:
 
 ```text
+dotnet-library-template
+        |
+        | PR semanal de sincronização
+        v
 .github/agent-governance
         |
-        | versão canônica
+        | revisão + validação + merge
         v
-comparar perfil selecionado
+distribute-agent-skills.yml
         |
-        v
-repositório consumidor
-        |
-        v
-Pull Request revisado
-        |
-        v
-AGENTS.md + .agents/skills
+        +--> PR no repositório consumidor
+        +--> PR no repositório consumidor
+        +--> repositório já atualizado
 ```
 
-A primeira etapa de implementação é manual. Sincronização entre repositórios ou detecção de drift pode ser adicionada posteriormente, quando o contrato estiver mais maduro.
+`.github/workflows/distribute-agent-skills.yml` roda depois que uma skill canônica gerenciada muda na `main` e também pode ser executado manualmente em modo `dry_run`.
+
+O workflow percorre os repositórios públicos visíveis para a GitHub App configurada. Um consumidor participa apenas das skills gerenciadas que já existem em `.agents/skills/<skill>/SKILL.md`. Skills ausentes não são instaladas automaticamente.
+
+Quando existe drift, o arquivo canônico substitui byte-for-byte a cópia do consumidor na branch controlada pela automação `chore/sync-agent-governance`. Um único Pull Request revisável é criado ou atualizado por repositório, independentemente de quantas skills tenham mudado. Auto-merge continua desabilitado.
+
+Como o repositório de controle `.github` é público, repositórios não públicos são ignorados para evitar exposição de nomes ou metadados em logs e summaries públicos do workflow.
+
+A sincronização do perfil completo e do `AGENTS.md` continua manual nesta etapa.
 
 ## Autoridade local
 
 Um perfil compartilhado é uma baseline, não substitui o conhecimento específico do projeto. Repositórios consumidores podem estender ou sobrescrever regras de arquitetura, domínio, comandos de build/teste, release, segurança, compatibilidade e skills locais.
 
-A árvore real e o contrato local do repositório continuam sendo a fonte de verdade.
+A árvore real e o contrato local do repositório continuam sendo a fonte de verdade. Para as skills gerenciadas automaticamente, divergências locais são apresentadas como Pull Request em vez de serem sobrescritas diretamente na branch padrão.
 
 ## Modelo de enforcement
 
@@ -100,4 +114,4 @@ A governança centralizada nunca deve ser usada como justificativa para remover 
 
 ## Validação
 
-`.github/workflows/agent-governance-validation.yml` valida a versão canônica, arquivos obrigatórios do perfil, frontmatter das skills, nomes duplicados, referências do perfil e regras essenciais de contexto/validação do perfil de biblioteca .NET.
+`.github/workflows/agent-governance-validation.yml` valida a versão canônica, arquivos obrigatórios do perfil, frontmatter das skills, nomes duplicados, referências do perfil, regras essenciais de contexto/validação e os contratos dos workflows de sincronização upstream e distribuição.

@@ -1,0 +1,404 @@
+name: Distribute managed agent skills
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "agent-governance/skills/dotnet/dotnet-issue-implementation/**"
+      - "agent-governance/skills/dotnet/dotnet-bug-investigation/**"
+      - "agent-governance/skills/dotnet/dotnet-pr-review/**"
+      - "agent-governance/skills/dotnet/dotnet-security-review/**"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Detect consumer drift without creating or updating Pull Requests"
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: distribute-managed-agent-skills
+  cancel-in-progress: false
+
+jobs:
+  distribute:
+    name: Update managed skills in consumer repositories
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Create GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3
+        with:
+          client-id: ${{ vars.DOTNET_SDK_SYNC_APP_CLIENT_ID }}
+          private-key: ${{ secrets.DOTNET_SDK_SYNC_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          permission-contents: write
+          permission-pull-requests: write
+
+      - name: Checkout canonical governance
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event_name == 'push' && github.sha || 'main' }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Distribute existing managed skills
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          OWNER: ${{ github.repository_owner }}
+          CENTRAL_REPO: ${{ github.repository }}
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || false }}
+        run: |
+          set -Eeuo pipefail
+
+          readonly SYNC_BRANCH="chore/sync-agent-governance"
+          readonly PR_TITLE="chore(agent-governance): update managed agent skills"
+          readonly GOVERNANCE_ROOT="$GITHUB_WORKSPACE"
+
+          mappings=(
+            "dotnet-issue-implementation|agent-governance/skills/dotnet/dotnet-issue-implementation/SKILL.md|.agents/skills/dotnet-issue-implementation/SKILL.md"
+            "dotnet-bug-investigation|agent-governance/skills/dotnet/dotnet-bug-investigation/SKILL.md|.agents/skills/dotnet-bug-investigation/SKILL.md"
+            "dotnet-pr-review|agent-governance/skills/dotnet/dotnet-pr-review/SKILL.md|.agents/skills/dotnet-pr-review/SKILL.md"
+            "dotnet-security-review|agent-governance/skills/dotnet/dotnet-security-review/SKILL.md|.agents/skills/dotnet-security-review/SKILL.md"
+          )
+
+          repositories_file="$(mktemp)"
+          cleanup_paths=("$repositories_file")
+
+          cleanup() {
+            for path in "${cleanup_paths[@]}"; do
+              [[ -e "$path" ]] && rm -rf "$path"
+            done
+          }
+          trap cleanup EXIT
+
+          central_sha="$(git rev-parse HEAD)"
+          governance_version="$(tr -d '[:space:]' < agent-governance/VERSION)"
+
+          for mapping in "${mappings[@]}"; do
+            IFS='|' read -r skill central_path consumer_path <<< "$mapping"
+            if [[ ! -s "$central_path" ]]; then
+              echo "::error title=Missing canonical skill::$central_path is missing or empty."
+              exit 1
+            fi
+          done
+
+          gh api --paginate "/installation/repositories?per_page=100" \
+            --jq '.repositories[] | [.full_name, .default_branch, (.archived | tostring), (.fork | tostring), (.visibility // "private")] | @tsv' \
+            > "$repositories_file"
+
+          repositories_scanned=0
+          repositories_private_skipped=0
+          repositories_without_managed_skills=0
+          repositories_current=0
+          repositories_with_drift=0
+          pull_requests_created=0
+          pull_requests_updated=0
+          repository_errors=0
+
+          {
+            echo "# Managed agent skill distribution"
+            echo
+            printf 'Central source: `%s@%s`\n' "$CENTRAL_REPO" "$central_sha"
+            printf 'Governance version: `%s`\n' "$governance_version"
+            echo
+            echo "| Repository | Result |"
+            echo "| --- | --- |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          log_result() {
+            local repo="$1"
+            local result="$2"
+            printf '| `%s` | %s |\n' "$repo" "$result" >> "$GITHUB_STEP_SUMMARY"
+          }
+
+          fetch_consumer_file() {
+            local repo="$1"
+            local path="$2"
+            local ref="$3"
+            local output="$4"
+            local status
+
+            status="$(
+              curl --silent --show-error --location \
+                --output "$output" \
+                --write-out "%{http_code}" \
+                --header "Accept: application/vnd.github+json" \
+                --header "Authorization: Bearer $GH_TOKEN" \
+                --header "X-GitHub-Api-Version: 2022-11-28" \
+                --get \
+                --data-urlencode "ref=$ref" \
+                "$GITHUB_API_URL/repos/$repo/contents/$path"
+            )"
+
+            printf '%s' "$status"
+          }
+
+          gh auth setup-git
+
+          while IFS=$'\t' read -r repo default_branch archived fork visibility; do
+            [[ -z "$repo" ]] && continue
+            [[ "$repo" != "$OWNER/"* ]] && continue
+            [[ "$repo" == "$CENTRAL_REPO" ]] && continue
+
+            if [[ "$archived" == "true" || "$fork" == "true" ]]; then
+              continue
+            fi
+
+            # This control repository is public. Do not expose private repository
+            # names or metadata in its public workflow logs or summaries.
+            if [[ "$visibility" != "public" ]]; then
+              repositories_private_skipped=$((repositories_private_skipped + 1))
+              continue
+            fi
+
+            repositories_scanned=$((repositories_scanned + 1))
+
+            declare -a changed_skills=()
+            declare -a changed_targets=()
+            managed_count=0
+            repo_failed=false
+
+            for mapping in "${mappings[@]}"; do
+              IFS='|' read -r skill central_path consumer_path <<< "$mapping"
+
+              response_file="$(mktemp)"
+              cleanup_paths+=("$response_file")
+              http_status="$(fetch_consumer_file "$repo" "$consumer_path" "$default_branch" "$response_file")"
+
+              case "$http_status" in
+                404)
+                  rm -f "$response_file"
+                  continue
+                  ;;
+                200)
+                  ;;
+                *)
+                  api_message="$(jq -r '.message // "Unknown GitHub API error"' "$response_file" 2>/dev/null || echo "Unknown GitHub API error")"
+                  rm -f "$response_file"
+                  echo "::error title=Consumer lookup failed::$repo/$consumer_path returned HTTP $http_status: $api_message"
+                  repo_failed=true
+                  break
+                  ;;
+              esac
+
+              if [[ "$(jq -r '.type // empty' "$response_file")" != "file" ]]; then
+                rm -f "$response_file"
+                echo "::error title=Invalid consumer skill::$repo/$consumer_path exists but is not a file."
+                repo_failed=true
+                break
+              fi
+
+              consumer_file="$(mktemp)"
+              cleanup_paths+=("$consumer_file")
+              jq -r '.content // empty' "$response_file" | tr -d '\n' | base64 --decode > "$consumer_file"
+              rm -f "$response_file"
+
+              if [[ ! -s "$consumer_file" ]]; then
+                rm -f "$consumer_file"
+                echo "::error title=Empty consumer skill::$repo/$consumer_path resolved to an empty file."
+                repo_failed=true
+                break
+              fi
+
+              managed_count=$((managed_count + 1))
+
+              if ! cmp --silent "$central_path" "$consumer_file"; then
+                changed_skills+=("$skill")
+                changed_targets+=("$consumer_path")
+              fi
+
+              rm -f "$consumer_file"
+            done
+
+            if [[ "$repo_failed" == "true" ]]; then
+              repository_errors=$((repository_errors + 1))
+              log_result "$repo" "Error while inspecting managed skills"
+              continue
+            fi
+
+            if [[ "$managed_count" -eq 0 ]]; then
+              repositories_without_managed_skills=$((repositories_without_managed_skills + 1))
+              log_result "$repo" "No managed skills"
+              continue
+            fi
+
+            if [[ "${#changed_skills[@]}" -eq 0 ]]; then
+              repositories_current=$((repositories_current + 1))
+              log_result "$repo" "Current ($managed_count managed skill(s))"
+              continue
+            fi
+
+            repositories_with_drift=$((repositories_with_drift + 1))
+            changed_list="$(IFS=', '; echo "${changed_skills[*]}")"
+
+            if [[ "$DRY_RUN" == "true" ]]; then
+              log_result "$repo" "Drift detected — dry run ($changed_list)"
+              continue
+            fi
+
+            worktree="$(mktemp -d)"
+            cleanup_paths+=("$worktree")
+
+            if ! git clone --quiet --branch "$default_branch" --single-branch "https://github.com/$repo.git" "$worktree"; then
+              echo "::error title=Clone failed::Unable to clone $repo@$default_branch."
+              repository_errors=$((repository_errors + 1))
+              log_result "$repo" "Error cloning repository"
+              rm -rf "$worktree"
+              continue
+            fi
+
+            git -C "$worktree" checkout -B "$SYNC_BRANCH" >/dev/null
+
+            for mapping in "${mappings[@]}"; do
+              IFS='|' read -r skill central_path consumer_path <<< "$mapping"
+              should_update=false
+              for changed_skill in "${changed_skills[@]}"; do
+                if [[ "$changed_skill" == "$skill" ]]; then
+                  should_update=true
+                  break
+                fi
+              done
+
+              if [[ "$should_update" != "true" ]]; then
+                continue
+              fi
+
+              if [[ ! -f "$worktree/$consumer_path" ]]; then
+                echo "::error title=Consumer changed during sync::$repo/$consumer_path disappeared after drift detection."
+                repo_failed=true
+                break
+              fi
+
+              cp "$GOVERNANCE_ROOT/$central_path" "$worktree/$consumer_path"
+            done
+
+            if [[ "$repo_failed" == "true" ]]; then
+              repository_errors=$((repository_errors + 1))
+              log_result "$repo" "Error applying managed skill update"
+              rm -rf "$worktree"
+              continue
+            fi
+
+            if ! git -C "$worktree" diff --check; then
+              echo "::error title=Invalid generated diff::$repo contains whitespace errors after skill synchronization."
+              repository_errors=$((repository_errors + 1))
+              log_result "$repo" "Generated diff failed validation"
+              rm -rf "$worktree"
+              continue
+            fi
+
+            git -C "$worktree" config user.name "agent-governance-sync[bot]"
+            git -C "$worktree" config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git -C "$worktree" add -- "${changed_targets[@]}"
+
+            if git -C "$worktree" diff --cached --quiet; then
+              repositories_current=$((repositories_current + 1))
+              log_result "$repo" "Current after refresh"
+              rm -rf "$worktree"
+              continue
+            fi
+
+            git -C "$worktree" commit -m "$PR_TITLE" >/dev/null
+
+            existing_pr="$(
+              gh pr list \
+                --repo "$repo" \
+                --state open \
+                --head "$SYNC_BRANCH" \
+                --json number \
+                --jq '.[0].number // empty'
+            )"
+
+            remote_branch_sha="$(
+              gh api "repos/$repo/git/ref/heads/$SYNC_BRANCH" --jq '.object.sha' 2>/dev/null || true
+            )"
+
+            if [[ -n "$remote_branch_sha" ]]; then
+              git -C "$worktree" push --quiet \
+                --force-with-lease="refs/heads/$SYNC_BRANCH:$remote_branch_sha" \
+                origin "HEAD:refs/heads/$SYNC_BRANCH"
+            else
+              git -C "$worktree" push --quiet origin "HEAD:refs/heads/$SYNC_BRANCH"
+            fi
+
+            pr_body="$(mktemp)"
+            cleanup_paths+=("$pr_body")
+            {
+              echo "## Automated agent governance update"
+              echo
+              echo "This Pull Request updates managed agent skills that already exist in this repository."
+              echo
+              printf 'Central source: `%s`\n' "$CENTRAL_REPO"
+              printf 'Governance version: `%s`\n' "$governance_version"
+              printf 'Central commit: `%s`\n' "$central_sha"
+              echo
+              echo "### Updated skills"
+              echo
+              for skill in "${changed_skills[@]}"; do
+                printf -- '- `%s`\n' "$skill"
+              done
+              echo
+              echo "### Policy"
+              echo
+              echo "- Only skills already present in the consumer repository are managed."
+              echo "- Missing skills are not installed automatically."
+              echo "- Managed files are copied byte-for-byte from the central registry."
+              echo "- The automation-owned branch may be refreshed by later distribution runs."
+              echo "- Auto-merge is disabled; repository CI and human review remain authoritative."
+              echo "- Repository-specific files outside these managed skill paths are not changed."
+            } > "$pr_body"
+
+            if [[ -n "$existing_pr" ]]; then
+              gh pr edit "$existing_pr" \
+                --repo "$repo" \
+                --title "$PR_TITLE" \
+                --body-file "$pr_body" \
+                >/dev/null
+              pr_url="$(gh pr view "$existing_pr" --repo "$repo" --json url --jq '.url')"
+              pull_requests_updated=$((pull_requests_updated + 1))
+              log_result "$repo" "PR updated: $pr_url ($changed_list)"
+            else
+              pr_url="$(
+                gh pr create \
+                  --repo "$repo" \
+                  --base "$default_branch" \
+                  --head "$SYNC_BRANCH" \
+                  --title "$PR_TITLE" \
+                  --body-file "$pr_body"
+              )"
+              pull_requests_created=$((pull_requests_created + 1))
+              log_result "$repo" "PR created: $pr_url ($changed_list)"
+            fi
+
+            rm -f "$pr_body"
+            rm -rf "$worktree"
+          done < "$repositories_file"
+
+          {
+            echo
+            echo "## Summary"
+            echo
+            echo "| Metric | Count |"
+            echo "| --- | ---: |"
+            echo "| Public repositories scanned | $repositories_scanned |"
+            echo "| Non-public repositories skipped | $repositories_private_skipped |"
+            echo "| Repositories without managed skills | $repositories_without_managed_skills |"
+            echo "| Repositories already current | $repositories_current |"
+            echo "| Repositories with drift | $repositories_with_drift |"
+            echo "| Pull Requests created | $pull_requests_created |"
+            echo "| Pull Requests updated | $pull_requests_updated |"
+            echo "| Repository errors | $repository_errors |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [[ "$repository_errors" -gt 0 ]]; then
+            echo "::error::$repository_errors repository distribution operation(s) failed."
+            exit 1
+          fi

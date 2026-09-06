@@ -1,0 +1,257 @@
+name: Sync upstream agent skills
+
+on:
+  schedule:
+    # 09:20 America/Sao_Paulo (12:20 UTC), every Monday.
+    - cron: "20 12 * * 1"
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: "dotnet-library-template ref to synchronize"
+        required: false
+        default: main
+        type: string
+      dry_run:
+        description: "Detect and report drift without creating or updating a Pull Request"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sync-upstream-agent-skills
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Sync curated upstream skills
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Create GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3
+        with:
+          client-id: ${{ vars.DOTNET_SDK_SYNC_APP_CLIENT_ID }}
+          private-key: ${{ secrets.DOTNET_SDK_SYNC_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
+      - name: Checkout governance repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Synchronize curated skills
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          SOURCE_REPO: rodri-oliveira-dev/dotnet-library-template
+          SOURCE_REF: ${{ github.event_name == 'workflow_dispatch' && inputs.source_ref || 'main' }}
+          TARGET_REPO: ${{ github.repository }}
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || false }}
+        run: |
+          set -Eeuo pipefail
+
+          readonly SYNC_BRANCH="chore/sync-upstream-agent-skills"
+          readonly PR_TITLE="chore(agent-governance): sync upstream .NET skills"
+
+          mappings=(
+            "dotnet-issue-implementation|.agents/skills/dotnet-issue-implementation/SKILL.md|agent-governance/skills/dotnet/dotnet-issue-implementation/SKILL.md"
+            "dotnet-bug-investigation|.agents/skills/dotnet-bug-investigation/SKILL.md|agent-governance/skills/dotnet/dotnet-bug-investigation/SKILL.md"
+            "dotnet-pr-review|.agents/skills/dotnet-pr-review/SKILL.md|agent-governance/skills/dotnet/dotnet-pr-review/SKILL.md"
+            "dotnet-security-review|.agents/skills/dotnet-security-review/SKILL.md|agent-governance/skills/dotnet/dotnet-security-review/SKILL.md"
+          )
+
+          source_sha="$(
+            gh api \
+              --method GET \
+              "repos/$SOURCE_REPO/commits" \
+              -f sha="$SOURCE_REF" \
+              -f per_page=1 \
+              --jq '.[0].sha // empty'
+          )"
+
+          if [[ -z "$source_sha" ]]; then
+            echo "::error title=Unknown upstream ref::$SOURCE_REPO does not resolve ref '$SOURCE_REF'."
+            exit 1
+          fi
+
+          git fetch origin main --prune
+          git fetch origin "+refs/heads/$SYNC_BRANCH:refs/remotes/origin/$SYNC_BRANCH" 2>/dev/null || true
+          git checkout -B "$SYNC_BRANCH" origin/main
+
+          declare -a target_files=()
+
+          for mapping in "${mappings[@]}"; do
+            IFS='|' read -r expected_name source_path target_path <<< "$mapping"
+
+            if ! response="$(
+              gh api \
+                --method GET \
+                "repos/$SOURCE_REPO/contents/$source_path" \
+                -f ref="$SOURCE_REF"
+            )"; then
+              echo "::error title=Missing upstream skill::$SOURCE_REPO@$SOURCE_REF does not expose $source_path."
+              exit 1
+            fi
+
+            if [[ "$(jq -r '.type // empty' <<< "$response")" != "file" ]]; then
+              echo "::error title=Invalid upstream skill::$source_path is not a file."
+              exit 1
+            fi
+
+            mkdir -p "$(dirname "$target_path")"
+            temp_file="$(mktemp)"
+            jq -r '.content' <<< "$response" | tr -d '\n' | base64 --decode > "$temp_file"
+
+            if [[ ! -s "$temp_file" ]]; then
+              rm -f "$temp_file"
+              echo "::error title=Empty upstream skill::$source_path resolved to an empty file."
+              exit 1
+            fi
+
+            actual_name="$(sed -n 's/^name: //p' "$temp_file" | head -n 1)"
+            description="$(sed -n 's/^description: //p' "$temp_file" | head -n 1)"
+            license="$(sed -n 's/^license: //p' "$temp_file" | head -n 1)"
+
+            if [[ "$(head -n 1 "$temp_file")" != "---" ]]; then
+              rm -f "$temp_file"
+              echo "::error title=Invalid skill frontmatter::$source_path must start with YAML frontmatter."
+              exit 1
+            fi
+            if [[ "$actual_name" != "$expected_name" ]]; then
+              rm -f "$temp_file"
+              echo "::error title=Unexpected skill name::$source_path declares '$actual_name'; expected '$expected_name'."
+              exit 1
+            fi
+            if [[ -z "$description" ]]; then
+              rm -f "$temp_file"
+              echo "::error title=Missing skill description::$source_path has no description."
+              exit 1
+            fi
+            if [[ "$license" != "MIT" ]]; then
+              rm -f "$temp_file"
+              echo "::error title=Unexpected skill license::$source_path must declare license: MIT."
+              exit 1
+            fi
+
+            mv "$temp_file" "$target_path"
+            target_files+=("$target_path")
+          done
+
+          git diff --check
+
+          existing_pr="$(
+            gh pr list \
+              --repo "$TARGET_REPO" \
+              --state open \
+              --head "$SYNC_BRANCH" \
+              --json number \
+              --jq '.[0].number // empty'
+          )"
+
+          if git diff --quiet -- "${target_files[@]}"; then
+            {
+              echo "# Agent skill synchronization"
+              echo
+              echo "No drift detected."
+              echo
+              printf 'Source: `%s@%s` (`%s`)\n' "$SOURCE_REPO" "$source_sha" "$SOURCE_REF"
+              if [[ -n "$existing_pr" ]]; then
+                echo
+                echo "Existing sync PR #$existing_pr was left unchanged."
+              fi
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          mapfile -t changed_paths < <(git diff --name-only -- "${target_files[@]}")
+
+          {
+            echo "# Agent skill synchronization"
+            echo
+            printf 'Source: `%s@%s` (`%s`)\n' "$SOURCE_REPO" "$source_sha" "$SOURCE_REF"
+            echo
+            echo "## Drift"
+            echo
+            for path in "${changed_paths[@]}"; do
+              printf -- '- `%s`\n' "$path"
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [[ "$DRY_RUN" == "true" ]]; then
+            echo >> "$GITHUB_STEP_SUMMARY"
+            echo "Dry run: no branch or Pull Request was changed." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          git config user.name "agent-governance-sync[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- "${target_files[@]}"
+          git commit -m "$PR_TITLE"
+
+          gh auth setup-git
+          git push --force-with-lease --set-upstream origin "$SYNC_BRANCH"
+
+          pr_body="$(mktemp)"
+          {
+            echo "## Automated agent skill synchronization"
+            echo
+            echo "This Pull Request synchronizes the curated upstream-owned .NET skills into the central agent-governance registry."
+            echo
+            printf 'Source repository: `%s`\n' "$SOURCE_REPO"
+            printf 'Source ref: `%s`\n' "$SOURCE_REF"
+            printf 'Source commit: `%s`\n' "$source_sha"
+            echo
+            echo "### Updated files"
+            echo
+            for path in "${changed_paths[@]}"; do
+              printf -- '- `%s`\n' "$path"
+            done
+            echo
+            echo "### Synchronization policy"
+            echo
+            echo "- Only the four explicitly allowlisted skills are synchronized."
+            echo "- Their contents are copied byte-for-byte from the upstream repository."
+            echo "- New upstream skills are not discovered or imported automatically."
+            echo "- The automation-owned branch may be force-updated by later synchronization runs."
+            echo "- Auto-merge is intentionally disabled; governance changes require review."
+            echo
+            echo "### Validation"
+            echo
+            echo "- Upstream files were resolved through the GitHub API."
+            echo "- Required skill frontmatter, names, descriptions, and MIT license were validated before commit."
+            echo "- `git diff --check` passed."
+            echo "- The repository's Agent governance validation workflow remains the merge gate."
+          } > "$pr_body"
+
+          if [[ -n "$existing_pr" ]]; then
+            gh pr edit "$existing_pr" \
+              --repo "$TARGET_REPO" \
+              --title "$PR_TITLE" \
+              --body-file "$pr_body"
+            pr_url="$(gh pr view "$existing_pr" --repo "$TARGET_REPO" --json url --jq '.url')"
+            action="updated"
+          else
+            pr_url="$(
+              gh pr create \
+                --repo "$TARGET_REPO" \
+                --base main \
+                --head "$SYNC_BRANCH" \
+                --title "$PR_TITLE" \
+                --body-file "$pr_body"
+            )"
+            action="created"
+          fi
+
+          rm -f "$pr_body"
+
+          {
+            echo
+            printf 'Pull Request %s: %s\n' "$action" "$pr_url"
+          } >> "$GITHUB_STEP_SUMMARY"

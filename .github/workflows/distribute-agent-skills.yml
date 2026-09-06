@@ -5,6 +5,7 @@ on:
     branches:
       - main
     paths:
+      - ".github/workflows/distribute-agent-skills.yml"
       - "agent-governance/skills/dotnet/dotnet-issue-implementation/**"
       - "agent-governance/skills/dotnet/dotnet-bug-investigation/**"
       - "agent-governance/skills/dotnet/dotnet-pr-review/**"

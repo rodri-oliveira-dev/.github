@@ -73,9 +73,15 @@ jobs:
           cleanup_paths=("$repositories_file")
 
           cleanup() {
+            local exit_code=$?
+            local path
+
+            trap - EXIT
             for path in "${cleanup_paths[@]}"; do
-              [[ -e "$path" ]] && rm -rf "$path"
+              rm -rf -- "$path" || true
             done
+
+            return "$exit_code"
           }
           trap cleanup EXIT
 

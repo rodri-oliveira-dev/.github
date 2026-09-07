@@ -52,6 +52,18 @@ Examples of repository-specific overrides include:
 - build, testing, release, or compatibility requirements;
 - repository-specific agent instructions and skills.
 
+## GitHub API integration
+
+This repository also acts as a control plane for integrations built on a GitHub App and the GitHub REST API. Maintenance workflows authenticate with short-lived installation tokens and use scoped API operations to discover repositories, read repository metadata and contents, create or update branches, and open reviewable Pull Requests.
+
+Current API-backed integrations include:
+
+- `.NET SDK synchronization`, which discovers repositories, reads `global.json`, creates update branches, writes eligible SDK changes, and opens Pull Requests;
+- managed agent-skill distribution, which inspects consumer repositories and creates or refreshes Pull Requests when approved central skills drift;
+- `.NET repository inventory`, which uses the GitHub App as a read-only discovery boundary before repository inspection.
+
+The integration model follows least privilege: GitHub App permissions are scoped to each workflow's needs, writes are review-gated through Pull Requests, and read-only workflows do not modify inspected repositories.
+
 ## Central .NET automations
 
 ### .NET SDK synchronization

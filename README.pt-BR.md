@@ -52,6 +52,18 @@ Exemplos de regras que podem ser sobrescritas localmente:
 - requisitos de build, testes, release ou compatibilidade;
 - instruções e skills específicas de agentes do repositório.
 
+## Integração com a API do GitHub
+
+Este repositório também atua como um control plane para integrações construídas sobre uma GitHub App e a GitHub REST API. Os workflows de manutenção se autenticam com tokens de instalação de curta duração e utilizam operações de API com escopo restrito para descobrir repositórios, ler metadados e conteúdos, criar ou atualizar branches e abrir Pull Requests revisáveis.
+
+As integrações atuais baseadas na API incluem:
+
+- sincronização do `.NET SDK`, que descobre repositórios, lê `global.json`, cria branches de atualização, grava alterações elegíveis de SDK e abre Pull Requests;
+- distribuição de skills gerenciadas de agentes, que inspeciona repositórios consumidores e cria ou atualiza Pull Requests quando as skills centrais aprovadas apresentam drift;
+- inventário de repositórios `.NET`, que usa a GitHub App como fronteira de descoberta somente leitura antes da inspeção dos projetos.
+
+O modelo de integração segue o princípio de menor privilégio: as permissões da GitHub App são restritas às necessidades de cada workflow, alterações são controladas por revisão através de Pull Requests e workflows somente leitura não modificam os repositórios inspecionados.
+
 ## Automações centrais de .NET
 
 ### Sincronização central do .NET SDK

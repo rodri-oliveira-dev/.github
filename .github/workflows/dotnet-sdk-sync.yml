@@ -120,7 +120,7 @@ jobs:
 
           write_header
 
-          tab="$(printf '\\t')"
+          tab="$(printf '\t')"
 
           while IFS="$tab" read -r visibility_marker repo default_branch archived fork; do
             if [[ "$visibility_marker" == "non_public" ]]; then

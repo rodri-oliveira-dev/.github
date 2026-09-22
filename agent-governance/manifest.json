@@ -6,6 +6,9 @@
       "name": "dotnet-library",
       "source": "agent-governance/profiles/dotnet-library/AGENTS.md",
       "target": "AGENTS.md",
+      "owner": {
+        "type": "central"
+      },
       "distribution": {
         "mode": "manual",
         "auto_merge": false,

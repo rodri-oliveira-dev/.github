@@ -20,7 +20,6 @@ jobs:
     permissions:
       contents: read
     outputs:
-      repositories_b64: ${{ steps.discover.outputs.repositories_b64 }}
       repository_count: ${{ steps.discover.outputs.repository_count }}
 
     steps:
@@ -44,8 +43,11 @@ jobs:
           set -Eeuo pipefail
 
           raw_repositories="$(mktemp)"
-          sanitized_repositories="$(mktemp)"
-          trap 'rm -f "$raw_repositories" "$sanitized_repositories"' EXIT
+          discovery_dir="$RUNNER_TEMP/dotnet-repository-discovery"
+          sanitized_repositories="$discovery_dir/repositories.json"
+
+          mkdir -p "$discovery_dir"
+          trap 'rm -f "$raw_repositories"' EXIT
 
           gh api --paginate "/installation/repositories?per_page=100" \
             --jq '.repositories[]' \
@@ -67,18 +69,24 @@ jobs:
           ' "$raw_repositories" > "$sanitized_repositories"
 
           repository_count="$(jq 'length' "$sanitized_repositories")"
-          repositories_b64="$(base64 --wrap=0 "$sanitized_repositories")"
 
           printf 'repository_count=%s\n' "$repository_count" >> "$GITHUB_OUTPUT"
-          printf 'repositories_b64=%s\n' "$repositories_b64" >> "$GITHUB_OUTPUT"
 
           {
             echo "# .NET repository inventory discovery"
             echo
             printf 'Eligible public repositories: %s\n' "$repository_count"
             echo
-            echo "Only repository name and default branch are transferred to the inspection job."
+            echo "Only repository name and default branch are transferred to the inspection job through a short-lived artifact."
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload sanitized discovery artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: dotnet-repository-discovery
+          path: ${{ runner.temp }}/dotnet-repository-discovery/repositories.json
+          if-no-files-found: error
+          retention-days: 1
 
   inspection:
     name: Inspect discovered public .NET repositories
@@ -88,15 +96,21 @@ jobs:
       contents: read
 
     steps:
+      - name: Download sanitized discovery artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: dotnet-repository-discovery
+          path: ${{ runner.temp }}/dotnet-repository-discovery
+
       - name: Validate inspection trust boundary
         shell: bash
         env:
-          DISCOVERED_REPOSITORIES_B64: ${{ needs.discovery.outputs.repositories_b64 }}
+          DISCOVERED_REPOSITORIES_FILE: ${{ runner.temp }}/dotnet-repository-discovery/repositories.json
         run: |
           set -Eeuo pipefail
 
-          if [[ -z "$DISCOVERED_REPOSITORIES_B64" ]]; then
-            echo "::error::Discovery output is missing."
+          if [[ ! -s "$DISCOVERED_REPOSITORIES_FILE" ]]; then
+            echo "::error::Sanitized discovery artifact is missing or empty."
             exit 1
           fi
 
@@ -107,10 +121,6 @@ jobs:
             fi
           done
 
-          decoded="$(mktemp)"
-          trap 'rm -f "$decoded"' EXIT
-          printf '%s' "$DISCOVERED_REPOSITORIES_B64" | base64 --decode > "$decoded"
-
           jq -e '
             type == "array"
             and all(.[];
@@ -118,7 +128,7 @@ jobs:
               and (.default_branch | type == "string")
               and (keys | sort == ["default_branch", "repository"])
             )
-          ' "$decoded" >/dev/null
+          ' "$DISCOVERED_REPOSITORIES_FILE" >/dev/null
 
       - name: Clone DotNetRepoInspector without credentials
         shell: bash
@@ -156,7 +166,7 @@ jobs:
         shell: bash
         env:
           OWNER: ${{ github.repository_owner }}
-          DISCOVERED_REPOSITORIES_B64: ${{ needs.discovery.outputs.repositories_b64 }}
+          DISCOVERED_REPOSITORIES_FILE: ${{ runner.temp }}/dotnet-repository-discovery/repositories.json
           ARTIFACTS_DIR: ${{ github.workspace }}/artifacts
           INSPECTOR_PROJECT: ${{ github.workspace }}/.inspector/src/DotNetRepoInspector.Cli/DotNetRepoInspector.Cli.csproj
           DOTNET_CLI_TELEMETRY_OPTOUT: "1"
@@ -437,9 +447,8 @@ jobs:
             } >> "$GITHUB_STEP_SUMMARY"
           }
 
-          printf '%s' "$DISCOVERED_REPOSITORIES_B64" \
-            | base64 --decode \
-            | jq -r '.[] | [.repository, .default_branch] | @tsv' \
+          jq -r '.[] | [.repository, .default_branch] | @tsv' \
+            "$DISCOVERED_REPOSITORIES_FILE" \
             > "$eligible_repositories_file"
 
           repositories_planned="$(wc -l < "$eligible_repositories_file" | tr -d '[:space:]')"

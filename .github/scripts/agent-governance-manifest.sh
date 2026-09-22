@@ -33,7 +33,7 @@ agent_governance_validate_manifest() {
         (.name | safe_name) and .profile == "dotnet-library" and
         (.source | safe_file) and
         (.source | test("^agent-governance/skills/(dotnet|dotnet-library)/[a-z0-9-]+/SKILL[.]md$")) and
-        (.source | split("/")[-2] == .name) and
+        ((.source | split("/")[-2]) == .name) and
         (.target == (".agents/skills/" + .name + "/SKILL.md")) and
         (.owner | type == "object") and
         (if .owner.type == "upstream" then

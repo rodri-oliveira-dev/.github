@@ -328,7 +328,7 @@ jobs:
           grep -Fq 'sdk_update_relation "$current" "$latest"' "$sdk"
           grep -Fq 'sdk_update_relation "$branch_version" "$latest"' "$sdk"
           grep -Fq 'PR #$AUTOMATION_PR_NUMBER already proposes latest SDK $latest' "$sdk"
-          grep -Fq 'gh pr edit "$AUTOMATION_PR_NUMBER"' "$sdk"
+          grep -Fq 'gh pr edit "$pr_number"' "$sdk"
           grep -Fq -- '--force-with-lease="refs/heads/$UPDATE_BRANCH:$branch_parent_sha"' "$sdk"
           grep -Fq 'pull_requests_updated=$((pull_requests_updated + 1))' "$sdk"
           grep -Fq -- '--data-urlencode "ref=$default_sha"' "$sdk"

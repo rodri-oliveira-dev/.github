@@ -1,6 +1,6 @@
 schema_version: 1
 profile: dotnet-library
-governance_version: 1.0.0
+governance_version: 1.1.0
 status: active
 
 # The canonical source/target catalog and per-artifact distribution policy

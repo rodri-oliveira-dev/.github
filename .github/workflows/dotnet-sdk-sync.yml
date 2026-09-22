@@ -63,9 +63,13 @@ jobs:
 
           release_index="$(mktemp)"
           repositories_file="$(mktemp)"
+          sdk_worktree=""
 
           cleanup() {
             rm -f "$release_index" "$repositories_file"
+            if [[ -n "$sdk_worktree" ]]; then
+              rm -rf -- "$sdk_worktree"
+            fi
           }
           trap cleanup EXIT
 
@@ -138,6 +142,7 @@ jobs:
           files_updated=0
 
           write_header
+          gh auth setup-git
 
           tab="$(printf '\t')"
 
@@ -309,69 +314,89 @@ jobs:
               pr_action="created"
             fi
 
-            branch_file_response="$(
-              gh api \
-                --method GET \
-                "repos/$repo/contents/$GLOBAL_JSON_PATH" \
-                -f ref="$branch_parent_sha"
-            )"
-            branch_content="$(jq -r '.content' <<< "$branch_file_response" | tr -d '\n' | base64 --decode)"
+            sdk_worktree="$(mktemp -d)"
+            git -C "$sdk_worktree" init --quiet
+            git -C "$sdk_worktree" remote add origin "https://github.com/$repo.git"
+
+            if ! git -C "$sdk_worktree" fetch --quiet --depth=1 \
+              origin "refs/heads/$UPDATE_BRANCH:refs/remotes/origin/$UPDATE_BRANCH"; then
+              ownership_errors=$((ownership_errors + 1))
+              echo "::error title=Automation branch fetch failed::Unable to fetch $repo/$UPDATE_BRANCH after ownership verification."
+              log_result "$repo" "Skipped — unable to fetch proven automation branch"
+              rm -rf -- "$sdk_worktree"
+              sdk_worktree=""
+              continue
+            fi
+
+            fetched_branch_sha="$(git -C "$sdk_worktree" rev-parse "refs/remotes/origin/$UPDATE_BRANCH")"
+            if [[ "$fetched_branch_sha" != "$branch_parent_sha" ]]; then
+              ownership_errors=$((ownership_errors + 1))
+              echo "::error title=Automation branch changed before SDK refresh::$repo/$UPDATE_BRANCH moved after ownership verification."
+              log_result "$repo" "Skipped — automation branch changed before SDK refresh"
+              rm -rf -- "$sdk_worktree"
+              sdk_worktree=""
+              continue
+            fi
+
+            git -C "$sdk_worktree" checkout --quiet --detach "$branch_parent_sha"
+
+            if [[ ! -f "$sdk_worktree/$GLOBAL_JSON_PATH" ]]; then
+              ownership_errors=$((ownership_errors + 1))
+              echo "::error title=Unexpected SDK branch state::$repo/$UPDATE_BRANCH no longer contains $GLOBAL_JSON_PATH."
+              log_result "$repo" "Skipped — automation branch no longer contains root global.json"
+              rm -rf -- "$sdk_worktree"
+              sdk_worktree=""
+              continue
+            fi
+
+            branch_content="$(cat "$sdk_worktree/$GLOBAL_JSON_PATH")"
             updated_content="$(jq --arg version "$latest" '.sdk.version = $version' <<< "$branch_content")"
 
             if [[ "$branch_content" == "$updated_content" ]]; then
               if [[ "$pr_action" == "updated" ]]; then
                 log_result "$repo" "PR #$AUTOMATION_PR_NUMBER already proposes latest SDK $latest"
+                rm -rf -- "$sdk_worktree"
+                sdk_worktree=""
                 continue
               fi
 
               ownership_errors=$((ownership_errors + 1))
               echo "::error title=Unexpected SDK branch state::$repo/$UPDATE_BRANCH was created but produced no SDK content change."
               log_result "$repo" "Skipped — newly created automation branch had no SDK diff"
+              rm -rf -- "$sdk_worktree"
+              sdk_worktree=""
               continue
             fi
 
-            blob_sha="$(
-              gh api \
-                --method POST \
-                "repos/$repo/git/blobs" \
-                -f content="$updated_content" \
-                -f encoding="utf-8" \
-                --jq '.sha'
-            )"
-            parent_tree_sha="$(gh api "repos/$repo/git/commits/$branch_parent_sha" --jq '.tree.sha')"
-            updated_tree_sha="$(
-              gh api \
-                --method POST \
-                "repos/$repo/git/trees" \
-                -f base_tree="$parent_tree_sha" \
-                -f "tree[][path]=$GLOBAL_JSON_PATH" \
-                -f "tree[][mode]=100644" \
-                -f "tree[][type]=blob" \
-                -f "tree[][sha]=$blob_sha" \
-                --jq '.sha'
-            )"
-            update_commit_sha="$(
-              gh api \
-                --method POST \
-                "repos/$repo/git/commits" \
-                -f message="chore: update .NET SDK from $current to $latest" \
-                -f tree="$updated_tree_sha" \
-                -f "parents[]=$branch_parent_sha" \
-                --jq '.sha'
-            )"
+            printf '%s\n' "$updated_content" > "$sdk_worktree/$GLOBAL_JSON_PATH"
 
-            if ! gh api \
-              --method PATCH \
-              "repos/$repo/git/refs/heads/$UPDATE_BRANCH" \
-              -f sha="$update_commit_sha" \
-              -F force=false \
-              >/dev/null; then
+            if ! git -C "$sdk_worktree" diff --check; then
+              ownership_errors=$((ownership_errors + 1))
+              echo "::error title=Invalid SDK update::$repo/$GLOBAL_JSON_PATH contains whitespace errors after update."
+              log_result "$repo" "Skipped — generated SDK update failed validation"
+              rm -rf -- "$sdk_worktree"
+              sdk_worktree=""
+              continue
+            fi
+
+            git -C "$sdk_worktree" config user.name "dotnet-sdk-sync[bot]"
+            git -C "$sdk_worktree" config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git -C "$sdk_worktree" add -- "$GLOBAL_JSON_PATH"
+            git -C "$sdk_worktree" commit --quiet -m "chore: update .NET SDK from $current to $latest"
+
+            if ! git -C "$sdk_worktree" push --quiet \
+              --force-with-lease="refs/heads/$UPDATE_BRANCH:$branch_parent_sha" \
+              origin "HEAD:refs/heads/$UPDATE_BRANCH"; then
               ownership_errors=$((ownership_errors + 1))
               echo "::error title=Automation branch changed during SDK refresh::$repo/$UPDATE_BRANCH no longer matches the proven parent SHA."
               log_result "$repo" "Skipped — automation branch changed during SDK refresh"
+              rm -rf -- "$sdk_worktree"
+              sdk_worktree=""
               continue
             fi
 
+            rm -rf -- "$sdk_worktree"
+            sdk_worktree=""
             files_updated=$((files_updated + 1))
 
             pr_body="$(mktemp)"

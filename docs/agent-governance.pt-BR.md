@@ -34,7 +34,7 @@ agent-governance/profiles/dotnet-library/
 └── profile.yml
 ```
 
-`AGENTS.md` é o arquivo distribuível de instruções. `profile.yml` declara a versão canônica da governança e as skills que devem ser materializadas em `.agents/skills/` no repositório consumidor.
+`AGENTS.md` é o arquivo distribuível de instruções. `profile.yml` mantém a identidade e a versão do perfil e aponta para o manifesto canônico `agent-governance/manifest.json`, que declara as skills, os caminhos de origem/destino, ownership e políticas de distribuição.
 
 ### Skills
 
@@ -56,6 +56,11 @@ A versão do contrato fica em `agent-governance/VERSION` e segue versionamento s
 Atualizações de governança devem ser tratadas como atualizações de dependência: revisar o diff, entender mudança de comportamento, executar validações e fazer merge de forma intencional.
 
 Não faça auto-merge de mudanças de governança.
+
+
+### Validação obrigatória do versionamento
+
+Cada Pull Request executa `.github/scripts/check-agent-governance-version.sh` contra o SHA exato da base no check obrigatório `Validate governance source`. Alterações em skills canônicas, políticas base, instruções de perfil e metadados contratuais do manifesto/perfil exigem **aumento estrito** de `agent-governance/VERSION`, com os campos de versão do manifesto e do perfil sincronizados. READMEs/documentação independentes, mudanças apenas na implementação de workflows e formatação JSON do manifesto não exigem bump. Mudanças de redação dentro de `SKILL.md` são tratadas conservadoramente como contratuais. Consulte a [política de versionamento](../agent-governance/README.md#required-version-bump-in-pull-requests) para critérios de MAJOR/MINOR/PATCH e comandos de teste local.
 
 ## Fluxo de atualização de consumidores
 

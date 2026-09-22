@@ -2,14 +2,6 @@ name: Agent governance validation
 
 on:
   pull_request:
-    paths:
-      - "agent-governance/**"
-      - "docs/agent-governance*.md"
-      - ".github/workflows/agent-governance-validation.yml"
-      - ".github/workflows/sync-agent-skills.yml"
-      - ".github/workflows/distribute-agent-skills.yml"
-      - "README.md"
-      - "README.pt-BR.md"
   push:
     branches:
       - main

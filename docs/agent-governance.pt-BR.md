@@ -115,3 +115,5 @@ A governança centralizada nunca deve ser usada como justificativa para remover 
 ## Validação
 
 `.github/workflows/agent-governance-validation.yml` valida a versão canônica, arquivos obrigatórios do perfil, frontmatter das skills, nomes duplicados, referências do perfil, regras essenciais de contexto/validação e os contratos dos workflows de sincronização upstream e distribuição.
+
+O nome do job é `Validate governance source`. Ele executa em todo Pull Request. O ruleset ativo `main-hardened` exige esse check do GitHub Actions antes do merge na `main`; o workflow apenas publica o check e não impõe um merge gate sem o ruleset. O workflow deliberadamente não usa `pull_request.paths`, garantindo que o GitHub sempre crie o required check; a validação ocorre dentro do job em vez de ser filtrada no trigger do evento.

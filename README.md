@@ -199,6 +199,8 @@ merge decision
 
 [`agent-governance-validation.yml`](.github/workflows/agent-governance-validation.yml) validates the registry and the contracts of both synchronization workflows so the allowlist, mappings, review boundaries, and non-auto-merge behavior remain explicit.
 
+The `Validate governance source` job runs on every Pull Request. The active `main-hardened` ruleset for `main` requires this exact check from GitHub Actions; the workflow alone does not enforce merge protection. Pull Request path filters are intentionally not used so the required check is created even when a change does not touch agent-governance files.
+
 See [`docs/agent-governance.md`](docs/agent-governance.md) for the composition model, versioning rules, synchronization/distribution flow, and enforcement boundaries.
 
 ## Repository structure

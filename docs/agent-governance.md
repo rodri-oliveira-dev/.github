@@ -115,3 +115,5 @@ The centralized governance must never be used as a reason to remove or bypass CI
 ## Validation
 
 `.github/workflows/agent-governance-validation.yml` validates the canonical version, required profile files, skill frontmatter, duplicate skill names, profile references, key context/validation rules, and the upstream/distribution workflow contracts.
+
+The job name is `Validate governance source`. It runs for every Pull Request. The active `main-hardened` ruleset requires this check from GitHub Actions before merging into `main`; the workflow itself only publishes the check and cannot enforce a merge gate without that ruleset. The workflow deliberately avoids `pull_request.paths` so GitHub always creates the required check; validation runs inside the job rather than being filtered at the event trigger.

@@ -189,7 +189,7 @@ The workflow synchronizes only those four allowlisted files, validates their req
 
 ### Consumer distribution
 
-After a managed skill update is reviewed and merged into `.github/main`, [`distribute-agent-skills.yml`](.github/workflows/distribute-agent-skills.yml) runs automatically because its `push` trigger is scoped to the four managed skill paths.
+After a managed skill update is reviewed and merged into `.github/main`, [`distribute-agent-skills.yml`](.github/workflows/distribute-agent-skills.yml) runs automatically because its `push` trigger matches `agent-governance/manifest.json` and `agent-governance/skills/**`. The broader trigger does not expand distribution: only skills marked `pull-request-existing` in the validated manifest are eligible.
 
 The distributor scans public repositories visible to the configured GitHub App and checks whether each repository already contains any managed skill under `.agents/skills/<skill>/SKILL.md`. Existing managed files are compared byte-for-byte with the approved central version.
 

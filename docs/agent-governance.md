@@ -65,6 +65,11 @@ Governance updates should be treated like dependency updates: review the diff, u
 
 Do not auto-merge governance changes.
 
+
+### Automatic contract-version gate
+
+Every Pull Request runs `.github/scripts/check-agent-governance-version.sh` against the PR base SHA as part of the required `Validate governance source` job. Changes to canonical skill files, base policies, profile instructions and semantically changed manifest/profile metadata require a strictly increasing `agent-governance/VERSION` with identical version fields in the manifest and profile. The job does not require a bump for independent READMEs/docs, unrelated workflow changes, or only JSON formatting. See [the governance versioning policy](../agent-governance/README.md#required-version-bump-in-pull-requests) for MAJOR/MINOR/PATCH rules, conservative treatment of distributed instructions and local test commands.
+
 ## Consumer update flow
 
 The automated path for the four managed skills is:

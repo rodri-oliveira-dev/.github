@@ -379,7 +379,7 @@ jobs:
           grep -Fq '<!-- automation-branch-owner: dotnet-sdk-sync/v1 -->' "$sdk"
           grep -Fq '<!-- automation-branch-owner: sync-upstream-agent-skills/v1 -->' "$upstream"
           grep -Fq '<!-- automation-branch-owner: distribute-agent-skills/v1 -->' "$distribution"
-          grep -Fq 'gh pr edit "$AUTOMATION_PR_NUMBER"' "$sdk"
+          grep -Fq 'reconcile_existing_pr_metadata "$repo" "$AUTOMATION_PR_NUMBER" "$desired_pr_title" "$pr_body"' "$sdk"
           grep -Fq 'branch_parent_sha="$AUTOMATION_BRANCH_SHA"' "$sdk"
           grep -Fq 'sdk_worktree="$(mktemp -d)"' "$sdk"
           grep -Fq -- '--force-with-lease="refs/heads/$UPDATE_BRANCH:$branch_parent_sha"' "$sdk"

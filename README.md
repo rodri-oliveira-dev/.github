@@ -87,7 +87,7 @@ Its current policy is intentionally conservative:
 - does not auto-merge generated Pull Requests;
 - supports a manual `dry_run` mode before applying changes.
 
-The scheduled run executes every Monday at 09:00 in `America/Sao_Paulo` (12:00 UTC).
+The scheduled run executes every Monday at 09:00 in `America/Sao_Paulo` (12:00 UTC). The SDK synchronization job has an explicit **90-minute wall-clock limit**. A job-level timeout cancels the run and may prevent processing remaining repositories or writing its final Summary; it does not retry or roll back an in-flight GitHub mutation. Repository-level operational errors still follow the separate batch-isolation policy below.
 
 This workflow is maintenance automation, not a default community-health file inherited automatically by other repositories. It actively evaluates repositories through the GitHub App installation and creates repository-level Pull Requests when an eligible SDK update exists.
 

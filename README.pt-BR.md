@@ -2,6 +2,7 @@
 
 [![Sincronizar versões do .NET SDK](https://github.com/rodri-oliveira-dev/.github/actions/workflows/dotnet-sdk-sync.yml/badge.svg)](https://github.com/rodri-oliveira-dev/.github/actions/workflows/dotnet-sdk-sync.yml)
 [![Inventariar repositórios .NET](https://github.com/rodri-oliveira-dev/.github/actions/workflows/dotnet-repository-inventory.yml/badge.svg)](https://github.com/rodri-oliveira-dev/.github/actions/workflows/dotnet-repository-inventory.yml)
+[![Secret scan do control plane](https://github.com/rodri-oliveira-dev/.github/actions/workflows/control-plane-secret-scan.yml/badge.svg)](https://github.com/rodri-oliveira-dev/.github/actions/workflows/control-plane-secret-scan.yml)
 [![Validar governança de agentes](https://github.com/rodri-oliveira-dev/.github/actions/workflows/agent-governance-validation.yml/badge.svg)](https://github.com/rodri-oliveira-dev/.github/actions/workflows/agent-governance-validation.yml)
 [![Sincronizar skills upstream](https://github.com/rodri-oliveira-dev/.github/actions/workflows/sync-agent-skills.yml/badge.svg)](https://github.com/rodri-oliveira-dev/.github/actions/workflows/sync-agent-skills.yml)
 [![Distribuir skills gerenciadas](https://github.com/rodri-oliveira-dev/.github/actions/workflows/distribute-agent-skills.yml/badge.svg)](https://github.com/rodri-oliveira-dev/.github/actions/workflows/distribute-agent-skills.yml)
@@ -29,6 +30,7 @@ Arquivos específicos de cada repositório sempre têm prioridade quando um proj
 | [`.github/workflows/dotnet-sdk-sync.yml`](.github/workflows/dotnet-sdk-sync.yml) | Automação central que verifica arquivos `global.json` na raiz dos repositórios e abre Pull Requests de atualização do SDK quando aplicável. |
 | [`.github/workflows/dotnet-repository-inventory.yml`](.github/workflows/dotnet-repository-inventory.yml) | Automação central somente leitura que inventaria projetos .NET nos repositórios acessíveis à GitHub App configurada. |
 | [`.github/workflows/reusable-secret-scan.yml`](.github/workflows/reusable-secret-scan.yml) | Política reutilizável e agnóstica de linguagem para análise de secrets no histórico Git, aplicável a .NET e também a stacks futuras como Node.js, React, Java, Python, Go, Terraform, Kubernetes e Docker. |
+| [`.github/workflows/control-plane-secret-scan.yml`](.github/workflows/control-plane-secret-scan.yml) | Aplica a política reutilizável de secret scanning ao próprio control plane em todo Pull Request, pushes para `main`, auditorias agendadas e execuções manuais. |
 | [`.github/workflows/agent-governance-validation.yml`](.github/workflows/agent-governance-validation.yml) | Validação determinística do registry central de governança, mappings do perfil, skills gerenciadas e contratos de sincronização/distribuição. |
 | [`.github/workflows/sync-agent-skills.yml`](.github/workflows/sync-agent-skills.yml) | Sincronização semanal de quatro skills .NET em allowlist a partir do `dotnet-library-template`, sempre por Pull Request revisável no registry central. |
 | [`.github/workflows/distribute-agent-skills.yml`](.github/workflows/distribute-agent-skills.yml) | Distribui skills gerenciadas aprovadas em `.github/main` para repositórios públicos consumidores que já utilizam essas skills, abrindo um Pull Request por repositório quando existe drift. |
@@ -150,6 +152,8 @@ A política de segurança é deliberadamente conservadora:
 - impede que um Pull Request enfraqueça sua própria política em `.infisical-scan.toml` ou `.infisicalignore`, usando durante o scan as versões existentes na branch base.
 
 Falsos positivos devem ser revisados individualmente antes da inclusão de fingerprints ou exclusões. Uma credencial real deve primeiro ser revogada ou rotacionada; adicionar uma regra de ignore não é uma correção válida para um secret exposto.
+
+Este repositório aplica a mesma política a si próprio por meio de [`control-plane-secret-scan.yml`](.github/workflows/control-plane-secret-scan.yml). O caller fixa o scanner reutilizável em um commit SHA imutável e revisado, executa em todo Pull Request sem filtros de path, em pushes para `main`, semanalmente e sob demanda. Seu check deve ser configurado como status check obrigatório do ruleset `main-hardened`, fazendo findings ou falhas da ferramenta bloquearem o merge enquanto Pull Requests limpos recebem uma conclusão determinística de sucesso.
 
 Os repositórios podem adotar essa política através de um pequeno caller workflow que referencia este workflow reutilizável por `workflow_call`. Consulte [`docs/secret-scanning.pt-BR.md`](docs/secret-scanning.pt-BR.md) para exemplos de adoção, cenários suportados, tratamento de falsos positivos e orientações de resposta a incidentes.
 

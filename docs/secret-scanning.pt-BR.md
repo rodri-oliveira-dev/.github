@@ -56,6 +56,18 @@ Assim, um PR não consegue adicionar um secret e, no mesmo diff, adicionar uma r
 
 Depois que uma mudança legítima de política for revisada e mergeada, ela passa a valer normalmente nos próximos scans.
 
+## Proteção do próprio control plane
+
+Este repositório consome a política reutilizável por meio de [`control-plane-secret-scan.yml`](../.github/workflows/control-plane-secret-scan.yml).
+
+O caller referencia o workflow reutilizável deste repositório por **SHA completo e imutável de commit**, em vez de path local mutável, branch ou tag. Assim, um Pull Request não consegue enfraquecer `reusable-secret-scan.yml` e fazer seu próprio required check de secret scan executar essa política alterada. Atualizar a revisão confiável do scanner exige uma mudança explícita e revisada do SHA no caller.
+
+O caller deliberadamente não possui filtro `pull_request.paths`. Assim, seu check é publicado em todo Pull Request, inclusive mudanças somente de documentação ou de automações não relacionadas. Ele também executa em pushes para `main`, toda quinta-feira às 13:17 UTC e por `workflow_dispatch`.
+
+O caller concede apenas `contents: read` e não utiliza `pull_request_target`. O enforcement fica delegado ao workflow reutilizável: um scan limpo conclui com sucesso, enquanto findings ou uma execução não confiável da ferramenta/scanner falham de forma fechada.
+
+Depois que a primeira execução válida do caller publicar o contexto final do check, esse contexto exato do GitHub Actions deve ser adicionado ao ruleset ativo `main-hardened` como status check obrigatório. Essa etapa ocorre somente após observar o nome real do contexto, evitando deadlock do ruleset por um nome de check presumido.
+
 ## Uso em outro repositório
 
 Crie um caller pequeno no repositório consumidor, por exemplo `.github/workflows/secret-scan.yml`:

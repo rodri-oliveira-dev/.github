@@ -56,6 +56,18 @@ This prevents a pull request from adding a secret and suppressing the same findi
 
 After a legitimate policy change is reviewed and merged, it becomes effective for subsequent scans.
 
+## Protecting this control plane
+
+This repository consumes the reusable policy through [`control-plane-secret-scan.yml`](../.github/workflows/control-plane-secret-scan.yml).
+
+The caller references the reusable workflow from this repository using a **full immutable commit SHA**, rather than a local mutable path, branch, or tag. A Pull Request therefore cannot weaken `reusable-secret-scan.yml` and have its own required secret-scan check execute that modified policy. Updating the trusted scanner revision requires an explicit reviewed SHA change in the caller.
+
+The caller deliberately has no `pull_request.paths` filter. It therefore publishes its check for every Pull Request, including documentation-only or unrelated automation changes. It also runs on pushes to `main`, every Thursday at 13:17 UTC, and through `workflow_dispatch`.
+
+The caller grants only `contents: read` and does not use `pull_request_target`. It delegates enforcement to the reusable workflow: a clean scan succeeds, while findings or an untrustworthy scanner/tool execution fail closed.
+
+After the first valid caller execution publishes its final check context, that exact GitHub Actions context must be added to the active `main-hardened` ruleset as a required status check. This is intentionally done only after observing the real context name so the ruleset cannot deadlock on a guessed check name.
+
 ## Using it from another repository
 
 Create a small caller workflow in the consuming repository, for example `.github/workflows/secret-scan.yml`:

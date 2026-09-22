@@ -34,7 +34,15 @@ agent-governance/profiles/dotnet-library/
 └── profile.yml
 ```
 
-`AGENTS.md` is the distributable instruction file. `profile.yml` declares the canonical governance version and the skills that must be materialized under `.agents/skills/` in a consumer repository.
+`AGENTS.md` is the distributable instruction file. `profile.yml` declares profile identity/version and points to the **canonical** `agent-governance/manifest.json`, which declares the profile instructions and every skill's source, consumer target, ownership and distribution mode.
+
+
+
+### Canonical manifest and per-artifact policy
+
+`agent-governance/manifest.json` declares schema version `1`, governance version, the `dotnet-library` profile and all nine skills. The four explicitly upstream-owned skills use `pull-request-existing`: updates arrive in the control plane through a reviewed upstream synchronization PR and are offered to existing consumer files through another reviewed PR. The remaining five skills and profile instructions use `manual`. Each entry explicitly disables auto-merge and preserves consumer-local authority. `profile.yml` no longer repeats skill mappings or a misleading global manual distribution flag.
+
+Both automation workflows source `.github/scripts/agent-governance-manifest.sh`, validate the catalog fail-closed and calculate file mappings with `jq` before changing any branch. The distributor has a broad canonical skills push trigger but only the four `pull-request-existing` entries are eligible for automatic PR distribution. Run `bash .github/scripts/test-agent-governance-manifest.sh` for deterministic positive/negative contract tests. Manifest schema, path, ownership and governance-version inconsistencies stop the merge gate.
 
 ### Skills
 

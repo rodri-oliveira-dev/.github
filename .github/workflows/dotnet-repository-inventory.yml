@@ -48,8 +48,12 @@ jobs:
           trap 'rm -f "$raw_repositories" "$sanitized_repositories"' EXIT
 
           gh api --paginate "/installation/repositories?per_page=100" \
-            --jq --arg owner "$OWNER" '
-              .repositories[]
+            --jq '.repositories[]' \
+            > "$raw_repositories"
+
+          jq -s --arg owner "$OWNER" '
+            [
+              .[]
               | select(.owner.login == $owner)
               | select((.visibility // (if .private then "private" else "public" end)) == "public")
               | select(.archived == false)
@@ -58,9 +62,9 @@ jobs:
                   repository: .full_name,
                   default_branch: (.default_branch // "")
                 }
-            ' > "$raw_repositories"
-
-          jq -s 'sort_by(.repository)' "$raw_repositories" > "$sanitized_repositories"
+            ]
+            | sort_by(.repository)
+          ' "$raw_repositories" > "$sanitized_repositories"
 
           repository_count="$(jq 'length' "$sanitized_repositories")"
           repositories_b64="$(base64 --wrap=0 "$sanitized_repositories")"
@@ -716,7 +720,7 @@ jobs:
           retention-days: 3
 \t' read -r repository default_branch; do
             [[ -z "$repository" ]] && continue
-            readonly visibility="public"
+            visibility="public"
 
             repositories_processed=$((repositories_processed + 1))
             repositories_scanned=$repositories_processed

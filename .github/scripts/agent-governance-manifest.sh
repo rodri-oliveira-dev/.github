@@ -26,7 +26,9 @@ agent_governance_validate_manifest() {
     (.profiles | type == "array" and length == 1 and
       all(.[]; (.name | safe_name) and
         (.source | safe_file) and (.target == "AGENTS.md") and
-        (.source == ("agent-governance/profiles/" + .name + "/AGENTS.md")) and policy("manual"))) and
+        (.source == ("agent-governance/profiles/" + .name + "/AGENTS.md")) and
+        (.owner | type == "object" and .type == "central" and (keys == ["type"])) and
+        policy("manual"))) and
     (.profiles[0].name == "dotnet-library") and
     (.skills | type == "array" and length > 0 and
       all(.[];
@@ -53,13 +55,27 @@ agent_governance_validate_manifest() {
     return 1
   fi
 
-  local source
+  local source expected_name actual_name
   while IFS= read -r source; do
     if [[ ! -s "$source" ]]; then
       echo "::error title=Missing governance source::$source is missing or empty." >&2
       return 1
     fi
   done < <(jq -r '.profiles[].source, .skills[].source' "$manifest")
+
+  # This is also called by both automation workflows before any branch mutation,
+  # so a mislabeled source cannot be distributed merely because a PR gate is skipped.
+  while IFS=$'\t' read -r source expected_name; do
+    if [[ "$(head -n 1 "$source")" != "---" ]]; then
+      echo "::error title=Invalid canonical skill::$source is missing YAML frontmatter." >&2
+      return 1
+    fi
+    actual_name="$(sed -n 's/^name: //p' "$source" | head -n 1)"
+    if [[ "$actual_name" != "$expected_name" ]]; then
+      echo "::error title=Skill name mismatch::$source declares '$actual_name'; manifest expects '$expected_name'." >&2
+      return 1
+    fi
+  done < <(jq -r '.skills[] | [.source, .name] | @tsv' "$manifest")
 }
 
 # Output exactly the allowlisted managed mappings. The caller must validate

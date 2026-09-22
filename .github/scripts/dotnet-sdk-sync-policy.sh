@@ -4,6 +4,7 @@
 # This file is sourced by workflows and validation harnesses.
 
 SDK_POLICY_ERROR=""
+SDK_UPDATE_RELATION=""
 
 sdk_policy_fail() {
   SDK_POLICY_ERROR="$1"
@@ -63,8 +64,10 @@ sdk_update_relation() {
     return 1
   fi
 
+  SDK_UPDATE_RELATION=""
+
   if [[ "$current" == "$latest" ]]; then
-    printf '%s\n' "current"
+    SDK_UPDATE_RELATION="current"
     return 0
   fi
 
@@ -72,8 +75,8 @@ sdk_update_relation() {
   highest="$(printf '%s\n%s\n' "$current" "$latest" | sort -V | tail -n 1)"
 
   if [[ "$highest" == "$current" ]]; then
-    printf '%s\n' "newer"
+    SDK_UPDATE_RELATION="newer"
   else
-    printf '%s\n' "update"
+    SDK_UPDATE_RELATION="update"
   fi
 }

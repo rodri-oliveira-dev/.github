@@ -54,12 +54,17 @@ jobs:
           readonly GLOBAL_JSON_PATH="global.json"
           readonly OWNERSHIP_MARKER="<!-- automation-branch-owner: dotnet-sdk-sync/v1 -->"
           readonly OWNERSHIP_POLICY="$GITHUB_WORKSPACE/.github/scripts/automation-branch-ownership.sh"
+          readonly SDK_POLICY="$GITHUB_WORKSPACE/.github/scripts/dotnet-sdk-sync-policy.sh"
 
-          if [[ ! -r "$OWNERSHIP_POLICY" ]]; then
-            echo "::error title=Missing ownership policy::$OWNERSHIP_POLICY is required before cross-repository mutation."
-            exit 1
-          fi
+          for policy_file in "$OWNERSHIP_POLICY" "$SDK_POLICY"; do
+            if [[ ! -r "$policy_file" ]]; then
+              echo "::error title=Missing control-plane policy::$policy_file is required before cross-repository mutation."
+              exit 1
+            fi
+          done
+
           source "$OWNERSHIP_POLICY"
+          source "$SDK_POLICY"
 
           release_index="$(mktemp)"
           repositories_file="$(mktemp)"
@@ -106,6 +111,7 @@ jobs:
               echo "| Pull requests updated | $pull_requests_updated |"
               echo "| Repositories skipped | $repositories_skipped |"
               echo "| Non-public repositories skipped | $non_public_repositories_skipped |"
+              echo "| SDK policy errors | $sdk_policy_errors |"
               echo "| Automation ownership errors | $ownership_errors |"
             } | tee -a "$GITHUB_STEP_SUMMARY"
           }
@@ -138,6 +144,7 @@ jobs:
           pull_requests_updated=0
           repositories_skipped=0
           non_public_repositories_skipped=0
+          sdk_policy_errors=0
           ownership_errors=0
           files_updated=0
 
@@ -228,7 +235,14 @@ jobs:
               continue
             fi
 
-            channel="$(awk -F. '{ print $1 "." $2 }' <<< "$current")"
+            if ! validate_stable_sdk_version "$current" "Current SDK"; then
+              sdk_policy_errors=$((sdk_policy_errors + 1))
+              echo "::error title=Invalid current SDK::$repo/$GLOBAL_JSON_PATH: $SDK_POLICY_ERROR"
+              log_result "$repo" "Error — invalid current SDK version"
+              continue
+            fi
+
+            channel="$(sdk_channel "$current")"
 
             metadata="$(
               jq -r --arg channel "$channel" '
@@ -256,23 +270,39 @@ jobs:
             IFS="$tab" read -r latest release_type support_phase <<< "$metadata"
 
             if [[ -z "$latest" || "$latest" == *-* ]]; then
-              repositories_current=$((repositories_current + 1))
-              log_result "$repo" "No update (no stable SDK found for $channel)"
+              sdk_policy_errors=$((sdk_policy_errors + 1))
+              echo "::error title=Invalid latest SDK::$repo: release metadata did not provide a stable SDK for $channel."
+              log_result "$repo" "Error — release metadata returned no stable SDK for $channel"
               continue
             fi
 
-            if [[ "$current" == "$latest" ]]; then
-              repositories_current=$((repositories_current + 1))
-              log_result "$repo" "Current ($current)"
+            if ! relation="$(sdk_update_relation "$current" "$latest")"; then
+              sdk_policy_errors=$((sdk_policy_errors + 1))
+              echo "::error title=Invalid SDK transition::$repo: $SDK_POLICY_ERROR"
+              log_result "$repo" "Error — invalid SDK transition ($current → $latest)"
               continue
             fi
 
-            highest="$(printf '%s\n%s\n' "$current" "$latest" | sort -V | tail -n 1)"
-            if [[ "$highest" == "$current" ]]; then
-              repositories_current=$((repositories_current + 1))
-              log_result "$repo" "Current/newer than metadata ($current; metadata $latest)"
-              continue
-            fi
+            case "$relation" in
+              current)
+                repositories_current=$((repositories_current + 1))
+                log_result "$repo" "Current ($current)"
+                continue
+                ;;
+              newer)
+                repositories_current=$((repositories_current + 1))
+                log_result "$repo" "Current/newer than metadata ($current; metadata $latest)"
+                continue
+                ;;
+              update)
+                ;;
+              *)
+                sdk_policy_errors=$((sdk_policy_errors + 1))
+                echo "::error title=Unexpected SDK relation::$repo: '$relation'."
+                log_result "$repo" "Error — unexpected SDK relation"
+                continue
+                ;;
+            esac
 
             repositories_with_updates=$((repositories_with_updates + 1))
 
@@ -350,24 +380,63 @@ jobs:
             fi
 
             branch_content="$(cat "$sdk_worktree/$GLOBAL_JSON_PATH")"
-            updated_content="$(jq --arg version "$latest" '.sdk.version = $version' <<< "$branch_content")"
 
-            if [[ "$branch_content" == "$updated_content" ]]; then
-              if [[ "$pr_action" == "updated" ]]; then
-                log_result "$repo" "PR #$AUTOMATION_PR_NUMBER already proposes latest SDK $latest"
-                rm -rf -- "$sdk_worktree"
-                sdk_worktree=""
-                continue
-              fi
-
-              ownership_errors=$((ownership_errors + 1))
-              echo "::error title=Unexpected SDK branch state::$repo/$UPDATE_BRANCH was created but produced no SDK content change."
-              log_result "$repo" "Skipped — newly created automation branch had no SDK diff"
+            if ! jq -e . >/dev/null 2>&1 <<< "$branch_content"; then
+              sdk_policy_errors=$((sdk_policy_errors + 1))
+              echo "::error title=Invalid automation branch global.json::$repo/$UPDATE_BRANCH contains invalid JSON."
+              log_result "$repo" "Error — automation branch global.json is invalid"
               rm -rf -- "$sdk_worktree"
               sdk_worktree=""
               continue
             fi
 
+            branch_version="$(jq -r '.sdk.version // empty' <<< "$branch_content")"
+            if ! branch_relation="$(sdk_update_relation "$branch_version" "$latest")"; then
+              sdk_policy_errors=$((sdk_policy_errors + 1))
+              echo "::error title=Invalid automation branch SDK::$repo/$UPDATE_BRANCH: $SDK_POLICY_ERROR"
+              log_result "$repo" "Error — automation branch SDK is incompatible with target"
+              rm -rf -- "$sdk_worktree"
+              sdk_worktree=""
+              continue
+            fi
+
+            case "$branch_relation" in
+              current)
+                if [[ "$pr_action" == "updated" ]]; then
+                  log_result "$repo" "PR #$AUTOMATION_PR_NUMBER already proposes latest SDK $latest"
+                  rm -rf -- "$sdk_worktree"
+                  sdk_worktree=""
+                  continue
+                fi
+
+                sdk_policy_errors=$((sdk_policy_errors + 1))
+                echo "::error title=Unexpected SDK branch state::$repo/$UPDATE_BRANCH was newly created but already contains target SDK $latest."
+                log_result "$repo" "Error — newly created automation branch already has target SDK"
+                rm -rf -- "$sdk_worktree"
+                sdk_worktree=""
+                continue
+                ;;
+              newer)
+                sdk_policy_errors=$((sdk_policy_errors + 1))
+                echo "::error title=Automation branch SDK newer than target::$repo/$UPDATE_BRANCH proposes $branch_version while metadata target is $latest."
+                log_result "$repo" "Error — automation branch SDK is newer than metadata target"
+                rm -rf -- "$sdk_worktree"
+                sdk_worktree=""
+                continue
+                ;;
+              update)
+                ;;
+              *)
+                sdk_policy_errors=$((sdk_policy_errors + 1))
+                echo "::error title=Unexpected automation branch SDK relation::$repo: '$branch_relation'."
+                log_result "$repo" "Error — unexpected automation branch SDK relation"
+                rm -rf -- "$sdk_worktree"
+                sdk_worktree=""
+                continue
+                ;;
+            esac
+
+            updated_content="$(jq --arg version "$latest" '.sdk.version = $version' <<< "$branch_content")"
             printf '%s\n' "$updated_content" > "$sdk_worktree/$GLOBAL_JSON_PATH"
 
             if ! git -C "$sdk_worktree" diff --check; then
@@ -449,7 +518,14 @@ jobs:
 
           write_summary
 
+          if [[ "$sdk_policy_errors" -gt 0 ]]; then
+            echo "::error::$sdk_policy_errors repository SDK policy error(s) were detected; no unsafe SDK mutation was applied for those repositories."
+          fi
+
           if [[ "$ownership_errors" -gt 0 ]]; then
             echo "::error::$ownership_errors repository mutation(s) were blocked because automation branch ownership could not be proven."
+          fi
+
+          if [[ "$sdk_policy_errors" -gt 0 || "$ownership_errors" -gt 0 ]]; then
             exit 1
           fi

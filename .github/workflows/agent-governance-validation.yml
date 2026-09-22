@@ -11,6 +11,7 @@ on:
       - "docs/secret-scanning*.md"
       - ".github/actions/secret-scan-size-policy/**"
       - ".github/scripts/automation-branch-ownership.sh"
+      - ".github/scripts/dotnet-sdk-sync-policy.sh"
       - ".github/workflows/agent-governance-validation.yml"
       - ".github/workflows/reusable-secret-scan.yml"
       - ".github/workflows/control-plane-secret-scan.yml"
@@ -69,6 +70,7 @@ jobs:
             .github/workflows/distribute-agent-skills.yml
             .github/actions/secret-scan-size-policy/action.yml
             .github/actions/secret-scan-size-policy/check.sh
+            .github/scripts/dotnet-sdk-sync-policy.sh
             .github/workflows/reusable-secret-scan.yml
             .github/workflows/control-plane-secret-scan.yml
           )
@@ -274,6 +276,92 @@ jobs:
           grep -Fxq 'oversized-count=0' "$small_output"
           grep -Fq 'All tracked Git blobs in the selected scan scope are within the scanner size limit.' "$small_summary"
 
+
+      - name: Validate .NET SDK refresh policy
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          policy=".github/scripts/dotnet-sdk-sync-policy.sh"
+          sdk=".github/workflows/dotnet-sdk-sync.yml"
+
+          bash -n "$policy"
+          source "$policy"
+
+          # Strict stable numeric versions only.
+          validate_stable_sdk_version "10.0.102" "fixture"
+          if validate_stable_sdk_version "10.0.x" "fixture"; then
+            echo "::error::Malformed SDK version was incorrectly accepted."
+            exit 1
+          fi
+          grep -Fq "stable numeric major.minor.patch" <<< "$SDK_POLICY_ERROR"
+
+          if validate_sdk_pair "10.0.101" "9.0.300"; then
+            echo "::error::Cross-channel SDK transition was incorrectly accepted."
+            exit 1
+          fi
+          grep -Fq "same major.minor channel" <<< "$SDK_POLICY_ERROR"
+
+          # No PR / new PR path: default branch needs an update.
+          sdk_update_relation "10.0.100" "10.0.102"
+          [[ "$SDK_UPDATE_RELATION" == "update" ]]
+
+          # Existing PR already current: formatting is irrelevant; sdk.version controls idempotency.
+          current_pr_json='{ "sdk": { "rollForward": "latestPatch", "version": "10.0.102" } }'
+          current_pr_version="$(jq -r '.sdk.version' <<< "$current_pr_json")"
+          sdk_update_relation "$current_pr_version" "10.0.102"
+          [[ "$SDK_UPDATE_RELATION" == "current" ]]
+
+          # Existing PR is stale and must be refreshed to the latest eligible patch.
+          stale_pr_json=$'{\n  "sdk": {\n    "version": "10.0.101"\n  }\n}'
+          stale_pr_version="$(jq -r '.sdk.version' <<< "$stale_pr_json")"
+          sdk_update_relation "$stale_pr_version" "10.0.102"
+          [[ "$SDK_UPDATE_RELATION" == "update" ]]
+
+          # Never downgrade an automation branch that is already newer than release metadata.
+          sdk_update_relation "10.0.103" "10.0.102"
+          [[ "$SDK_UPDATE_RELATION" == "newer" ]]
+
+          # Workflow contract: validated before mutation, existing PR is edited, and CAS lease is preserved.
+          grep -Fq 'source "$SDK_POLICY"' "$sdk"
+          grep -Fq 'validate_stable_sdk_version "$current" "Current SDK"' "$sdk"
+          grep -Fq 'sdk_update_relation "$current" "$latest"' "$sdk"
+          grep -Fq 'sdk_update_relation "$branch_version" "$latest"' "$sdk"
+          grep -Fq 'PR #$AUTOMATION_PR_NUMBER already proposes latest SDK $latest' "$sdk"
+          grep -Fq 'gh pr edit "$pr_number"' "$sdk"
+          grep -Fq -- '--force-with-lease="refs/heads/$UPDATE_BRANCH:$branch_parent_sha"' "$sdk"
+          grep -Fq 'pull_requests_updated=$((pull_requests_updated + 1))' "$sdk"
+          grep -Fq -- '--data-urlencode "ref=$default_sha"' "$sdk"
+          grep -Fq 'sdk_update_relation "$exact_source_version" "$latest"' "$sdk"
+          grep -Fq 'reconcile_existing_pr_metadata()' "$sdk"
+          grep -Fq '[[ "$current_title" == "$desired_title" && "$current_body" == "$desired_body" ]]' "$sdk"
+          grep -Fq 'RECONCILED_PR_CHANGED="true"' "$sdk"
+
+          exact_validation_line="$(grep -n -E '^[[:space:]]*if ! sdk_update_relation "\$exact_source_version" "\$latest"; then[[:space:]]*$' "$sdk" | head -n 1 | cut -d: -f1)"
+          branch_creation_line="$(grep -n -F '"repos/$repo/git/refs"' "$sdk" | head -n 1 | cut -d: -f1)"
+          if [[ -z "$exact_validation_line" || -z "$branch_creation_line" || "$exact_validation_line" -ge "$branch_creation_line" ]]; then
+            echo "::error::The exact default-branch SDK source must be validated before creating the reserved automation branch."
+            exit 1
+          fi
+
+          reconcile_calls="$(grep -Fc 'reconcile_existing_pr_metadata "$repo" "$AUTOMATION_PR_NUMBER" "$desired_pr_title" "$pr_body"' "$sdk")"
+          if [[ "$reconcile_calls" -lt 2 ]]; then
+            echo "::error::Existing PR metadata must be reconciled both on the no-op/current path and after a branch refresh."
+            exit 1
+          fi
+
+          metadata_guard_line="$(grep -n -F '[[ "$current_title" == "$desired_title" && "$current_body" == "$desired_body" ]]' "$sdk" | head -n 1 | cut -d: -f1)"
+          metadata_edit_line="$(grep -n -F 'gh pr edit "$pr_number"' "$sdk" | head -n 1 | cut -d: -f1)"
+          if [[ -z "$metadata_guard_line" || -z "$metadata_edit_line" || "$metadata_guard_line" -ge "$metadata_edit_line" ]]; then
+            echo "::error::PR metadata must be compared before gh pr edit is invoked."
+            exit 1
+          fi
+
+          if grep -Fq '[[ "$branch_content" == "$updated_content" ]]' "$sdk"; then
+            echo "::error::SDK refresh idempotency must compare sdk.version semantically, not raw JSON formatting."
+            exit 1
+          fi
+
       - name: Validate automation branch ownership policy
         shell: bash
         run: |
@@ -291,7 +379,7 @@ jobs:
           grep -Fq '<!-- automation-branch-owner: dotnet-sdk-sync/v1 -->' "$sdk"
           grep -Fq '<!-- automation-branch-owner: sync-upstream-agent-skills/v1 -->' "$upstream"
           grep -Fq '<!-- automation-branch-owner: distribute-agent-skills/v1 -->' "$distribution"
-          grep -Fq 'gh pr edit "$AUTOMATION_PR_NUMBER"' "$sdk"
+          grep -Fq 'reconcile_existing_pr_metadata "$repo" "$AUTOMATION_PR_NUMBER" "$desired_pr_title" "$pr_body"' "$sdk"
           grep -Fq 'branch_parent_sha="$AUTOMATION_BRANCH_SHA"' "$sdk"
           grep -Fq 'sdk_worktree="$(mktemp -d)"' "$sdk"
           grep -Fq -- '--force-with-lease="refs/heads/$UPDATE_BRANCH:$branch_parent_sha"' "$sdk"

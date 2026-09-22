@@ -19,9 +19,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-    outputs:
-      repository_count: ${{ steps.discover.outputs.repository_count }}
-
     steps:
       - name: Create GitHub App token
         id: app-token
@@ -34,7 +31,6 @@ jobs:
           permission-metadata: read
 
       - name: Discover and sanitize eligible repositories
-        id: discover
         shell: bash
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
@@ -69,8 +65,6 @@ jobs:
           ' "$raw_repositories" > "$sanitized_repositories"
 
           repository_count="$(jq 'length' "$sanitized_repositories")"
-
-          printf 'repository_count=%s\n' "$repository_count" >> "$GITHUB_OUTPUT"
 
           {
             echo "# .NET repository inventory discovery"

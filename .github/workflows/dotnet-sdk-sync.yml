@@ -97,7 +97,7 @@ jobs:
               echo "| Repositories with root global.json | $repositories_with_global_json |"
               echo "| Repositories already current / no automatic update | $repositories_current |"
               echo "| Repositories with updates | $repositories_with_updates |"
-              echo "| Files requiring updates | $files_updated |"
+              echo "| Files updated | $files_updated |"
               echo "| Pull requests created | $pull_requests_created |"
               echo "| Pull requests updated | $pull_requests_updated |"
               echo "| Repositories skipped | $repositories_skipped |"
@@ -317,6 +317,18 @@ jobs:
             )"
             branch_content="$(jq -r '.content' <<< "$branch_file_response" | tr -d '\n' | base64 --decode)"
             updated_content="$(jq --arg version "$latest" '.sdk.version = $version' <<< "$branch_content")"
+
+            if [[ "$branch_content" == "$updated_content" ]]; then
+              if [[ "$pr_action" == "updated" ]]; then
+                log_result "$repo" "PR #$AUTOMATION_PR_NUMBER already proposes latest SDK $latest"
+                continue
+              fi
+
+              ownership_errors=$((ownership_errors + 1))
+              echo "::error title=Unexpected SDK branch state::$repo/$UPDATE_BRANCH was created but produced no SDK content change."
+              log_result "$repo" "Skipped — newly created automation branch had no SDK diff"
+              continue
+            fi
 
             blob_sha="$(
               gh api \

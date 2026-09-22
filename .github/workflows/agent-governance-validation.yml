@@ -8,9 +8,11 @@ on:
     paths:
       - "agent-governance/**"
       - "docs/agent-governance*.md"
+      - ".github/scripts/automation-branch-ownership.sh"
       - ".github/workflows/agent-governance-validation.yml"
       - ".github/workflows/sync-agent-skills.yml"
       - ".github/workflows/distribute-agent-skills.yml"
+      - ".github/workflows/dotnet-sdk-sync.yml"
       - "README.md"
       - "README.pt-BR.md"
 
@@ -158,6 +160,10 @@ jobs:
           grep -Fq '<!-- automation-branch-owner: dotnet-sdk-sync/v1 -->' "$sdk"
           grep -Fq '<!-- automation-branch-owner: sync-upstream-agent-skills/v1 -->' "$upstream"
           grep -Fq '<!-- automation-branch-owner: distribute-agent-skills/v1 -->' "$distribution"
+          grep -Fq 'gh pr edit "$AUTOMATION_PR_NUMBER"' "$sdk"
+          grep -Fq 'branch_parent_sha="$AUTOMATION_BRANCH_SHA"' "$sdk"
+          grep -Fq -- '--method PATCH' "$sdk"
+          grep -Fq -- '-F force=false' "$sdk"
 
           if grep -Fq -- '--method DELETE' "$sdk"; then
             echo "::error::SDK sync must not delete a reserved branch based only on its name."
@@ -201,13 +207,15 @@ jobs:
           fixture_marker="<!-- automation-branch-owner: fixture/v1 -->"
           owned_sha="1111111111111111111111111111111111111111"
 
-          export FAKE_REFS_JSON="$(
+          FAKE_REFS_JSON="$(
             jq -cn \
               --arg ref "refs/heads/$fixture_branch" \
               --arg sha "$owned_sha" \
               '[{ref:$ref, object:{sha:$sha}}]'
           )"
-          export FAKE_PRS_JSON="$(
+          export FAKE_REFS_JSON
+
+          FAKE_PRS_JSON="$(
             jq -cn \
               --arg repo "$fixture_repo" \
               --arg branch "$fixture_branch" \
@@ -224,6 +232,7 @@ jobs:
                 base:{ref:$base}
               }]'
           )"
+          export FAKE_PRS_JSON
 
           verify_automation_branch_ownership \
             "$fixture_repo" "$fixture_branch" "$fixture_base" "$fixture_marker" "$fixture_title"

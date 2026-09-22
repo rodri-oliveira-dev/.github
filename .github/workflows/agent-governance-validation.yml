@@ -162,8 +162,14 @@ jobs:
           grep -Fq '<!-- automation-branch-owner: distribute-agent-skills/v1 -->' "$distribution"
           grep -Fq 'gh pr edit "$AUTOMATION_PR_NUMBER"' "$sdk"
           grep -Fq 'branch_parent_sha="$AUTOMATION_BRANCH_SHA"' "$sdk"
-          grep -Fq -- '--method PATCH' "$sdk"
-          grep -Fq -- '-F force=false' "$sdk"
+          grep -Fq 'sdk_worktree="$(mktemp -d)"' "$sdk"
+          grep -Fq -- '--force-with-lease="refs/heads/$UPDATE_BRANCH:$branch_parent_sha"' "$sdk"
+          grep -Fq 'origin "HEAD:refs/heads/$UPDATE_BRANCH"' "$sdk"
+
+          if grep -Fq -- '--method PATCH' "$sdk"; then
+            echo "::error::SDK sync must use an exact-head lease instead of ancestry-only ref PATCH semantics."
+            exit 1
+          fi
 
           if grep -Fq -- '--method DELETE' "$sdk"; then
             echo "::error::SDK sync must not delete a reserved branch based only on its name."
@@ -285,6 +291,16 @@ jobs:
             --force-with-lease="refs/heads/$fixture_branch:$captured_sha" \
             origin "HEAD:refs/heads/$fixture_branch" 2>/dev/null; then
             echo "::error::A stale force-with-lease unexpectedly overwrote a branch changed after SHA capture."
+            exit 1
+          fi
+
+          ancestor_sha="$(git -C "$seed" rev-parse "$captured_sha^")"
+          git --git-dir="$remote" update-ref "refs/heads/$fixture_branch" "$ancestor_sha"
+
+          if git -C "$seed" push --quiet \
+            --force-with-lease="refs/heads/$fixture_branch:$captured_sha" \
+            origin "HEAD:refs/heads/$fixture_branch" 2>/dev/null; then
+            echo "::error::A stale exact-head lease unexpectedly overwrote a branch reset to an ancestor."
             exit 1
           fi
 

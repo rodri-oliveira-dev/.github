@@ -147,7 +147,8 @@ Its security policy is intentionally conservative:
 - downloads a fixed Infisical CLI version and verifies its SHA-256 checksum before execution;
 - redacts detected values from scanner output;
 - scans only the relevant PR or push commit range when trustworthy and falls back to full-history scanning otherwise;
-- treats both detected secrets and scanner/tool failures as failing checks;
+- treats detected secrets, scanner/tool failures, and incomplete large-file coverage as failing checks;
+- checks the selected Git scope for blobs above the scanner's 20 MiB per-target limit and fails closed instead of reporting a partial scan as clean;
 - stores only a redacted SARIF report and retains it for 3 days;
 - prevents a Pull Request from weakening its own `.infisical-scan.toml` or `.infisicalignore` policy by using the base-branch versions during that PR scan.
 

@@ -193,6 +193,8 @@ When drift exists, the workflow creates or refreshes a single `chore/sync-agent-
 
 Because this control repository is public, non-public repositories are skipped without exposing their names or metadata in public workflow output. Manual execution defaults to `dry_run: true` so distribution can be inspected without writing to consumer repositories.
 
+Consumer distribution also isolates failures per public repository: read, clone, checkout, commit, push, and PR creation/refresh errors are recorded without suppressing subsequent consumers. The Summary includes an explicit `success`/`current`/`skipped`/`error` status for each evaluated public repository and a final aggregate error count. Read-only API GET calls alone use the bounded transient retry policy above; mutations are never blindly retried. Upstream skill synchronization targets only the central registry (one target), so failures there remain job-level failures rather than consumer-batch errors.
+
 The resulting supply chain is deliberately review-gated:
 
 ```text

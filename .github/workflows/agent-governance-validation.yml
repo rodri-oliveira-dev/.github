@@ -43,6 +43,20 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: 0
+
+      - name: Validate governance version gate
+        shell: bash
+        env:
+          GOVERNANCE_PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -Eeuo pipefail
+          bash -n .github/scripts/check-agent-governance-version.sh
+          bash -n .github/scripts/test-agent-governance-version.sh
+          bash .github/scripts/test-agent-governance-version.sh
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            bash .github/scripts/check-agent-governance-version.sh "$GOVERNANCE_PR_BASE_SHA"
+          fi
 
       - name: Validate version and required files
         shell: bash
@@ -71,6 +85,8 @@ jobs:
             .github/scripts/test-inventory-timeout.sh
             .github/scripts/agent-governance-manifest.sh
             .github/scripts/test-agent-governance-manifest.sh
+            .github/scripts/check-agent-governance-version.sh
+            .github/scripts/test-agent-governance-version.sh
             .github/workflows/reusable-secret-scan.yml
             .github/workflows/control-plane-secret-scan.yml
           )

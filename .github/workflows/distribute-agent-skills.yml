@@ -6,10 +6,8 @@ on:
       - main
     paths:
       - ".github/workflows/distribute-agent-skills.yml"
-      - "agent-governance/skills/dotnet/dotnet-issue-implementation/**"
-      - "agent-governance/skills/dotnet/dotnet-bug-investigation/**"
-      - "agent-governance/skills/dotnet/dotnet-pr-review/**"
-      - "agent-governance/skills/dotnet/dotnet-security-review/**"
+      - "agent-governance/manifest.json"
+      - "agent-governance/skills/**"
   workflow_dispatch:
     inputs:
       dry_run:
@@ -72,12 +70,11 @@ jobs:
           source "$OWNERSHIP_POLICY"
           source "$GOVERNANCE_ROOT/.github/scripts/batch-retry.sh"
 
-          mappings=(
-            "dotnet-issue-implementation|agent-governance/skills/dotnet/dotnet-issue-implementation/SKILL.md|.agents/skills/dotnet-issue-implementation/SKILL.md"
-            "dotnet-bug-investigation|agent-governance/skills/dotnet/dotnet-bug-investigation/SKILL.md|.agents/skills/dotnet-bug-investigation/SKILL.md"
-            "dotnet-pr-review|agent-governance/skills/dotnet/dotnet-pr-review/SKILL.md|.agents/skills/dotnet-pr-review/SKILL.md"
-            "dotnet-security-review|agent-governance/skills/dotnet/dotnet-security-review/SKILL.md|.agents/skills/dotnet-security-review/SKILL.md"
-          )
+          source "$GOVERNANCE_ROOT/.github/scripts/agent-governance-manifest.sh"
+          manifest="$GOVERNANCE_ROOT/agent-governance/manifest.json"
+          agent_governance_validate_manifest "$manifest" "$GOVERNANCE_ROOT/agent-governance/VERSION"
+          mapping_lines="$(agent_governance_mappings distribution "$manifest")"
+          mapfile -t mappings <<< "$mapping_lines"
 
           repositories_file="$(mktemp)"
           cleanup_paths=("$repositories_file")

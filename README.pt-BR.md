@@ -147,7 +147,8 @@ A política de segurança é deliberadamente conservadora:
 - baixa uma versão fixa do Infisical CLI e valida seu checksum SHA-256 antes da execução;
 - remove os valores detectados da saída do scanner;
 - analisa apenas o intervalo de commits relevante do PR ou push quando esse intervalo é confiável, utilizando histórico completo como fallback;
-- faz o check falhar tanto quando encontra possíveis secrets quanto quando o scanner não conclui de forma confiável;
+- faz o check falhar quando encontra possíveis secrets, quando o scanner não conclui de forma confiável ou quando a cobertura por tamanho é incompleta;
+- verifica o escopo Git selecionado em busca de blobs acima do limite de 20 MiB por target do scanner e falha fechado em vez de tratar um scan parcial como limpo;
 - armazena apenas um relatório SARIF com valores ocultos e retenção de 3 dias;
 - impede que um Pull Request enfraqueça sua própria política em `.infisical-scan.toml` ou `.infisicalignore`, usando durante o scan as versões existentes na branch base.
 

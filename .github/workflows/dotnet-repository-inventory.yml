@@ -17,6 +17,7 @@ jobs:
   discovery:
     name: Discover eligible public repositories
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
     steps:
@@ -86,11 +87,14 @@ jobs:
     name: Inspect discovered public .NET repositories
     needs: discovery
     runs-on: ubuntu-latest
+    timeout-minutes: 120
     permissions:
       contents: read
     env:
       INSPECTOR_VERSION: "1.5.2"
       INSPECTOR_SHA: "6524981f737086c1fdb370697e5d4100330f9bc3"
+      REPOSITORY_CLONE_TIMEOUT_SECONDS: "120"
+      REPOSITORY_INSPECTION_TIMEOUT_SECONDS: "300"
 
     steps:
       - name: Download sanitized discovery artifact
@@ -194,6 +198,14 @@ jobs:
 
           readonly INSPECTOR_REPOSITORY="rodri-oliveira-dev/DotNetRepoInspector"
           readonly INCLUDE_NON_PUBLIC_REPOSITORIES="false"
+
+          if [[ ! "$REPOSITORY_CLONE_TIMEOUT_SECONDS" =~ ^[1-9][0-9]*$ ]] ||
+            (( REPOSITORY_CLONE_TIMEOUT_SECONDS > 600 )) ||
+            [[ ! "$REPOSITORY_INSPECTION_TIMEOUT_SECONDS" =~ ^[1-9][0-9]*$ ]] ||
+            (( REPOSITORY_INSPECTION_TIMEOUT_SECONDS > 3600 )); then
+            echo "::error title=Invalid repository timeout::Clone timeout must be 1–600 seconds and inspection timeout 1–3600 seconds."
+            exit 1
+          fi
 
           if [[ ! "$INSPECTOR_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ || ! "$INSPECTOR_SHA" =~ ^[0-9a-f]{40}$ ]]; then
             echo "::error title=Invalid Inspector provenance::Inspector version/SHA metadata is invalid."
@@ -438,7 +450,9 @@ jobs:
                     ["Library projects", .library_projects],
                     ["Test projects", .test_projects],
                     ["Unknown projects", .unknown_projects],
-                    ["Inspection warnings/errors", .inspection_warnings_errors]
+                    ["Inspection warnings/errors", .inspection_warnings_errors],
+                    ["Repository clone timeouts", .repository_clone_timeouts],
+                    ["Repository inspection timeouts", .repository_inspection_timeouts]
                   ][]
                 | "| \(.[0]) | \(.[1]) |"
               ' "$inventory_json"
@@ -479,6 +493,8 @@ jobs:
           repositories_without_dotnet_projects=0
           repositories_with_warnings_errors=0
           inspection_warnings_errors=0
+          repository_clone_timeouts=0
+          repository_inspection_timeouts=0
 
           echo ".NET repository inventory"
           printf 'Inspector: v%s (%s)\n' "$INSPECTOR_VERSION" "$INSPECTOR_SHA"
@@ -516,17 +532,33 @@ jobs:
 
             rm -rf "$repo_dir"
 
-            if ! git clone \
-              --depth 1 \
-              --branch "$default_branch" \
-              --filter=blob:none \
-              --quiet \
-              "https://github.com/$repository.git" \
-              "$repo_dir"; then
-              record_problem "$repository" "clone" "Default branch could not be cloned."
+            # GNU timeout (without --foreground) signals the command's process
+            # group; --kill-after bounds even a child that ignores SIGTERM.
+            if timeout --signal=TERM --kill-after=10s "${REPOSITORY_CLONE_TIMEOUT_SECONDS}s" \
+              git clone \
+                --depth 1 \
+                --branch "$default_branch" \
+                --filter=blob:none \
+                --quiet \
+                "https://github.com/$repository.git" \
+                "$repo_dir"; then
+              :
+            else
+              clone_exit_code=$?
+              if [[ "$clone_exit_code" == "124" || "$clone_exit_code" == "137" ]]; then
+                repository_clone_timeouts=$((repository_clone_timeouts + 1))
+                record_problem "$repository" "clone_timeout" "Clone exceeded ${REPOSITORY_CLONE_TIMEOUT_SECONDS}s; process group terminated."
+                inspection_warnings_errors=$((inspection_warnings_errors + 1))
+                append_repository "$repository" "$visibility" "$default_branch" "clone_timeout" 0 "Clone timed out after ${REPOSITORY_CLONE_TIMEOUT_SECONDS}s."
+                echo "::warning title=Repository clone timed out::$repository exceeded the ${REPOSITORY_CLONE_TIMEOUT_SECONDS}s clone limit."
+                cleanup_repository
+                print_repository_result "$repository_position" "$repositories_planned" "TIMEOUT" "$repository" "clone exceeded ${REPOSITORY_CLONE_TIMEOUT_SECONDS}s"
+                continue
+              fi
+              record_problem "$repository" "clone" "Default branch could not be cloned (exit $clone_exit_code)."
               inspection_warnings_errors=$((inspection_warnings_errors + 1))
               append_repository "$repository" "$visibility" "$default_branch" "clone_failed" 0 "Default branch could not be cloned."
-              echo "::warning title=Repository clone failed::Unable to clone $repository on $default_branch."
+              echo "::warning title=Repository clone failed::Unable to clone $repository on $default_branch (exit $clone_exit_code)."
               cleanup_repository
               print_repository_result "$repository_position" "$repositories_planned" "FAILED" "$repository" "clone failed"
               continue
@@ -549,22 +581,41 @@ jobs:
 
             repositories_with_dotnet_projects=$((repositories_with_dotnet_projects + 1))
 
-            set +e
-            env \
-              -u GH_TOKEN \
-              -u GITHUB_TOKEN \
-              -u ACTIONS_ID_TOKEN_REQUEST_TOKEN \
-              -u ACTIONS_RUNTIME_TOKEN \
-              dotnet run \
-                --project "$INSPECTOR_PROJECT" \
-                --configuration Release \
-                --no-build \
-                -- "$repo_dir" \
-                --output "$inspection_file" \
-                > "$inspector_stdout" \
-                2> "$inspector_stderr"
-            inspector_exit_code=$?
-            set -e
+            # Preserve the credential-free inspection boundary and terminate
+            # dotnet/MSBuild descendants as one process group on timeout.
+            if timeout --signal=TERM --kill-after=10s "${REPOSITORY_INSPECTION_TIMEOUT_SECONDS}s" \
+              env \
+                -u GH_TOKEN \
+                -u GITHUB_TOKEN \
+                -u ACTIONS_ID_TOKEN_REQUEST_TOKEN \
+                -u ACTIONS_RUNTIME_TOKEN \
+                dotnet run \
+                  --project "$INSPECTOR_PROJECT" \
+                  --configuration Release \
+                  --no-build \
+                  -- "$repo_dir" \
+                  --output "$inspection_file" \
+                  > "$inspector_stdout" \
+                  2> "$inspector_stderr"; then
+              inspector_exit_code=0
+            else
+              inspector_exit_code=$?
+            fi
+
+            if [[ "$inspector_exit_code" == "124" || "$inspector_exit_code" == "137" ]]; then
+              repository_inspection_timeouts=$((repository_inspection_timeouts + 1))
+              record_problem "$repository" "inspection_timeout" "Inspector exceeded ${REPOSITORY_INSPECTION_TIMEOUT_SECONDS}s; dotnet/MSBuild process group terminated."
+              inspection_warnings_errors=$((inspection_warnings_errors + 1))
+              echo "::warning title=Repository inspection timed out::$repository exceeded the ${REPOSITORY_INSPECTION_TIMEOUT_SECONDS}s inspection limit."
+              while IFS= read -r project_path; do
+                [[ -z "$project_path" ]] && continue
+                append_project_fallback "$repository" "$visibility" "$default_branch" "$project_path" "inspection_timeout"
+              done < "$csproj_paths_file"
+              append_repository "$repository" "$visibility" "$default_branch" "inspection_timeout" "$csproj_count" "Inspection timed out after ${REPOSITORY_INSPECTION_TIMEOUT_SECONDS}s."
+              cleanup_repository
+              print_repository_result "$repository_position" "$repositories_planned" "TIMEOUT" "$repository" "inspection exceeded ${REPOSITORY_INSPECTION_TIMEOUT_SECONDS}s"
+              continue
+            fi
 
             if [[ -s "$inspection_file" ]] && jq -e . "$inspection_file" >/dev/null 2>&1; then
               append_projects_from_report "$repository" "$visibility" "$default_branch" "$inspector_exit_code" "$inspection_file"
@@ -655,6 +706,8 @@ jobs:
             --argjson repositories_without_dotnet_projects "$repositories_without_dotnet_projects" \
             --argjson repositories_with_warnings_errors "$repositories_with_warnings_errors" \
             --argjson inspection_warnings_errors "$inspection_warnings_errors" \
+            --argjson repository_clone_timeouts "$repository_clone_timeouts" \
+            --argjson repository_inspection_timeouts "$repository_inspection_timeouts" \
             --slurpfile repositories <(jq -s '.' "$repositories_jsonl") \
             --slurpfile projects <(jq -s '.' "$projects_jsonl") \
             --slurpfile problems <(jq -s '.' "$problems_jsonl") \
@@ -683,7 +736,9 @@ jobs:
                   library_projects: ($project_rows | map(select(.classification == "library")) | length),
                   test_projects: ($project_rows | map(select(.classification == "test" or .is_test == true)) | length),
                   unknown_projects: ($project_rows | map(select(.classification == "unknown")) | length),
-                  inspection_warnings_errors: $inspection_warnings_errors
+                  inspection_warnings_errors: $inspection_warnings_errors,
+                  repository_clone_timeouts: $repository_clone_timeouts,
+                  repository_inspection_timeouts: $repository_inspection_timeouts
                 },
                 repositories: ($repositories[0] // []),
                 projects: $project_rows,
@@ -747,6 +802,8 @@ jobs:
           printf 'Repositories with .NET projects: %s\n' "$repositories_with_dotnet_projects"
           printf 'Repositories without .NET projects: %s\n' "$repositories_without_dotnet_projects"
           printf 'Repositories with warnings/errors: %s\n' "$repositories_with_warnings_errors"
+          printf 'Repository clone timeouts: %s\n' "$repository_clone_timeouts"
+          printf 'Repository inspection timeouts: %s\n' "$repository_inspection_timeouts"
           printf 'Total .NET projects: %s\n' "$total_dotnet_projects"
           echo
 

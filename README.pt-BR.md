@@ -87,7 +87,7 @@ A política atual é deliberadamente conservadora:
 - não faz merge automático dos Pull Requests gerados;
 - oferece modo manual `dry_run` para validar o resultado antes de aplicar alterações.
 
-A execução agendada ocorre toda segunda-feira às 09:00 em `America/Sao_Paulo` (12:00 UTC).
+A execução agendada ocorre toda segunda-feira às 09:00 em `America/Sao_Paulo` (12:00 UTC). O job de sincronização do SDK possui **limite global explícito de 90 minutos**. Se esse limite for atingido, o GitHub cancela a execução; repositórios restantes e o Summary final podem não ser processados, e uma mutação GitHub em andamento não é automaticamente repetida ou revertida. Erros operacionais por repositório continuam seguindo a política de isolamento do lote descrita abaixo.
 
 Esse workflow é uma automação de manutenção e não um arquivo de comunidade herdado automaticamente pelos demais repositórios. Ele consulta ativamente os repositórios através da instalação da GitHub App e cria Pull Requests individuais quando encontra uma atualização elegível do SDK.
 

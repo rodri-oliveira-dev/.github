@@ -202,7 +202,11 @@ DISCOVERED_REPOSITORIES_FILE="$fixture_root/repositories.json" \
 ARTIFACTS_DIR="$fixture_root/artifacts" \
 INSPECTOR_PROJECT="$fixture_root/fixture.csproj" \
 GITHUB_STEP_SUMMARY="$fixture_root/step-summary.md" \
-  bash "$fixture_root/production-inventory.bash" > "$fixture_root/production-output.log"
+  bash "$fixture_root/production-inventory.bash" > "$fixture_root/production-output.log" || {
+    echo "::error::Production inventory integration fixture failed."
+    tail -n 100 "$fixture_root/production-output.log"
+    exit 1
+  }
 
 report="$fixture_root/artifacts/dotnet-repository-inventory.json"
 [[ -s "$report" ]]

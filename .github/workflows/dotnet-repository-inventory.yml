@@ -120,13 +120,18 @@ jobs:
             )
           ' "$decoded" >/dev/null
 
-      - name: Checkout DotNetRepoInspector
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          repository: rodri-oliveira-dev/DotNetRepoInspector
-          ref: main
-          path: .inspector
-          persist-credentials: false
+      - name: Clone DotNetRepoInspector without credentials
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          git clone \
+            --depth 1 \
+            --branch main \
+            --filter=blob:none \
+            --quiet \
+            https://github.com/rodri-oliveira-dev/DotNetRepoInspector.git \
+            .inspector
 
       - name: Setup .NET SDKs
         uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4

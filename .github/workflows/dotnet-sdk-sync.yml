@@ -65,6 +65,7 @@ jobs:
 
           source "$OWNERSHIP_POLICY"
           source "$SDK_POLICY"
+          source "$GITHUB_WORKSPACE/.github/scripts/batch-retry.sh"
 
           release_index="$(mktemp)"
           repositories_file="$(mktemp)"
@@ -126,7 +127,9 @@ jobs:
             local body_file="$4"
             local metadata current_title current_body desired_body
 
-            metadata="$(gh pr view "$pr_number" --repo "$repo_name" --json title,body,url)"
+            if ! metadata="$(gh pr view "$pr_number" --repo "$repo_name" --json title,body,url)"; then
+              return 1
+            fi
             current_title="$(jq -r '.title' <<< "$metadata")"
             current_body="$(jq -r '.body // ""' <<< "$metadata")"
             desired_body="$(cat "$body_file")"
@@ -138,11 +141,13 @@ jobs:
               return 0
             fi
 
-            gh pr edit "$pr_number" \
+            if ! gh pr edit "$pr_number" \
               --repo "$repo_name" \
               --title "$desired_title" \
               --body-file "$body_file" \
-              >/dev/null
+              >/dev/null; then
+              return 1
+            fi
 
             RECONCILED_PR_CHANGED="true"
           }
@@ -176,6 +181,7 @@ jobs:
               echo "| Non-public repositories skipped | $non_public_repositories_skipped |"
               echo "| SDK policy errors | $sdk_policy_errors |"
               echo "| Automation ownership errors | $ownership_errors |"
+              echo "| Repository operation errors | $repository_errors |"
             } | tee -a "$GITHUB_STEP_SUMMARY"
           }
 
@@ -209,6 +215,7 @@ jobs:
           non_public_repositories_skipped=0
           sdk_policy_errors=0
           ownership_errors=0
+          repository_errors=0
           files_updated=0
 
           write_header
@@ -241,7 +248,7 @@ jobs:
             file_response_file="$(mktemp)"
 
             if ! http_status="$(
-              curl --silent --show-error --location \
+              batch_retry_http_get "$file_response_file" curl --silent --show-error --location \
                 --output "$file_response_file" \
                 --write-out "%{http_code}" \
                 --header "Accept: application/vnd.github+json" \
@@ -253,7 +260,9 @@ jobs:
             )"; then
               rm -f "$file_response_file"
               echo "::error title=GitHub Contents API request failed::Unable to query $repo/$GLOBAL_JSON_PATH."
-              exit 1
+              repository_errors=$((repository_errors + 1))
+              log_result "$repo" "Error — unable to read global.json"
+              continue
             fi
 
             case "$http_status" in
@@ -270,13 +279,20 @@ jobs:
                 api_message="$(jq -r '.message // "Unknown GitHub API error"' "$file_response_file" 2>/dev/null || echo "Unknown GitHub API error")"
                 rm -f "$file_response_file"
                 echo "::error title=GitHub Contents API returned HTTP $http_status::$repo/$GLOBAL_JSON_PATH: $api_message"
-                exit 1
+                repository_errors=$((repository_errors + 1))
+                log_result "$repo" "Error — Contents API HTTP $http_status"
+                continue
                 ;;
             esac
 
             repositories_with_global_json=$((repositories_with_global_json + 1))
 
-            content="$(jq -r '.content' <<< "$file_response" | tr -d '\n' | base64 --decode)"
+            if ! content="$(jq -er '.content | select(type == "string")' <<< "$file_response" | tr -d '\n' | base64 --decode)"; then
+              repository_errors=$((repository_errors + 1))
+              echo "::error title=Invalid Contents API payload::$repo/$GLOBAL_JSON_PATH could not be decoded."
+              log_result "$repo" "Error — invalid Contents API payload"
+              continue
+            fi
 
             if ! jq -e . >/dev/null 2>&1 <<< "$content"; then
               repositories_current=$((repositories_current + 1))
@@ -390,11 +406,16 @@ jobs:
               branch_parent_sha="$AUTOMATION_BRANCH_SHA"
               pr_action="updated"
             else
-              default_sha="$(gh api "repos/$repo/branches/$default_branch" --jq '.commit.sha')"
+              if ! default_sha="$(gh api "repos/$repo/branches/$default_branch" --jq '.commit.sha')" || [[ ! "$default_sha" =~ ^[0-9a-f]{40}$ ]]; then
+              repository_errors=$((repository_errors + 1))
+              echo "::error title=Default branch lookup failed::$repo branch SHA is unavailable or invalid."
+              log_result "$repo" "Error — default branch lookup failed"
+              continue
+            fi
               exact_source_response_file="$(mktemp)"
 
               if ! exact_source_status="$(
-                curl --silent --show-error --location \
+                batch_retry_http_get "$exact_source_response_file" curl --silent --show-error --location \
                   --output "$exact_source_response_file" \
                   --write-out "%{http_code}" \
                   --header "Accept: application/vnd.github+json" \
@@ -405,7 +426,7 @@ jobs:
                   "$GITHUB_API_URL/repos/$repo/contents/$GLOBAL_JSON_PATH"
               )"; then
                 rm -f "$exact_source_response_file"
-                sdk_policy_errors=$((sdk_policy_errors + 1))
+                repository_errors=$((repository_errors + 1))
                 echo "::error title=Exact SDK source read failed::Unable to validate $repo/$GLOBAL_JSON_PATH at $default_sha before branch creation."
                 log_result "$repo" "Error — exact default-branch SDK source could not be validated"
                 continue
@@ -414,7 +435,7 @@ jobs:
               if [[ "$exact_source_status" != "200" ]]; then
                 exact_source_message="$(jq -r '.message // "Unknown GitHub API error"' "$exact_source_response_file" 2>/dev/null || echo "Unknown GitHub API error")"
                 rm -f "$exact_source_response_file"
-                sdk_policy_errors=$((sdk_policy_errors + 1))
+                repository_errors=$((repository_errors + 1))
                 echo "::error title=Exact SDK source changed::$repo/$GLOBAL_JSON_PATH at $default_sha returned HTTP $exact_source_status: $exact_source_message"
                 log_result "$repo" "Error — exact default-branch SDK source is unavailable"
                 continue
@@ -422,7 +443,12 @@ jobs:
 
               exact_source_response="$(cat "$exact_source_response_file")"
               rm -f "$exact_source_response_file"
-              exact_source_content="$(jq -r '.content' <<< "$exact_source_response" | tr -d '\n' | base64 --decode)"
+              if ! exact_source_content="$(jq -er '.content | select(type == "string")' <<< "$exact_source_response" | tr -d '\n' | base64 --decode)"; then
+                repository_errors=$((repository_errors + 1))
+                echo "::error title=Invalid exact Contents API payload::$repo/$GLOBAL_JSON_PATH at $default_sha could not be decoded."
+                log_result "$repo" "Error — exact source payload invalid"
+                continue
+              fi
 
               if ! jq -e . >/dev/null 2>&1 <<< "$exact_source_content"; then
                 sdk_policy_errors=$((sdk_policy_errors + 1))

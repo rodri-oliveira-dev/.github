@@ -72,6 +72,9 @@ Reserved automation branches use an explicit provenance contract rather than tru
 
 The [canonical agent-governance manifest](agent-governance/manifest.json) defines the nine skills and per-artifact ownership/distribution policy. Four upstream-owned skills are synchronized and offered to existing consumers by reviewed Pull Request; the other five and profile instructions remain manual. [Agent governance documentation](agent-governance/README.md) explains the schema and local validation.
 
+
+Governance contract changes are version-gated on every Pull Request: changes to canonical skills, agent policies, profile instructions or manifest/profile semantics require an increasing `agent-governance/VERSION` and matching versions in the manifest and profile. Standalone documentation updates do not require a bump. See [versioning policy](agent-governance/README.md#required-version-bump-in-pull-requests).
+
 ### .NET SDK synchronization
 
 The [`dotnet-sdk-sync.yml`](.github/workflows/dotnet-sdk-sync.yml) workflow provides centralized SDK maintenance for repositories accessible to the configured GitHub App.

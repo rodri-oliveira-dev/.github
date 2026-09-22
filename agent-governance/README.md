@@ -54,15 +54,24 @@ The profile is the distributable contract. Repository-local instructions may ext
 
 [`manifest.json`](manifest.json) is the sole source of truth for schema version, the governance contract version, profile instructions and the nine skills. Every entry declares a canonical `source`, a consumer `target`, upstream ownership (`owner.type: upstream` with repository/path, or `central`), and its own `distribution` policy. `pull-request-existing` is restricted to the four upstream-owned managed skills: central synchronization reviews upstream updates first, then consumer distribution opens a PR **only where the target file already exists**. All other skills and the profile `AGENTS.md` remain `manual`. Every artifact disables auto-merge and preserves `local_authority`. The small `profiles/dotnet-library/profile.yml` retains identity/status/version and points to the canonical manifest rather than duplicating the skill catalog or claiming the entire profile uses one distribution mode.
 
-The upstream and consumer workflows validate the manifest and derive their actual file mappings through `.github/scripts/agent-governance-manifest.sh` using `jq`. An invalid schema, version, source, target or ownership policy blocks mutation. The distributor's broad push path filter wakes it for canonical skill changes, but **only** entries with `distribution.mode: pull-request-existing` are processed; manual artifacts never become automatically managed by triggering the workflow. Run `bash .github/scripts/test-agent-governance-manifest.sh` locally to validate the catalog, mappings and negative fixtures. Future additions/ownership changes require a reviewed update to the manifest and canonical source files; contract-version enforcement is tracked separately in #18.
+The upstream and consumer workflows validate the manifest and derive their actual file mappings through `.github/scripts/agent-governance-manifest.sh` using `jq`. An invalid schema, version, source, target or ownership policy blocks mutation. The distributor's broad push path filter wakes it for canonical skill changes, but **only** entries with `distribution.mode: pull-request-existing` are processed; manual artifacts never become automatically managed by triggering the workflow. Run `bash .github/scripts/test-agent-governance-manifest.sh` locally to validate the catalog, mappings and negative fixtures. Future additions/ownership changes require a reviewed update to the manifest and canonical source files. Contract-version enforcement is applied to every Pull Request by `Validate governance source`.
 
 ## Versioning
 
 `VERSION` is the governance contract version. Use semantic versioning:
 
-- PATCH: wording/clarity changes that do not materially change expected agent behavior;
-- MINOR: additive policy, new skills, or stronger validation that remains compatible with existing consumers;
-- MAJOR: changes that materially alter workflow, required gates, file layout, or expected agent behavior.
+- PATCH: compatible corrections/clarifications to distributed instructions or skill procedures that do not remove existing capabilities;
+- MINOR: additive skills, profile fields or policies that remain compatible with existing consumer contracts;
+- MAJOR: incompatible changes to required behavior, source/target layout, existing skill semantics or required gates.
+
+
+### Required version bump in Pull Requests
+
+The required `Validate governance source` check compares the PR's merge result with the exact base commit. Any changed, added, renamed or removed contractual file under `agent-governance/` requires `VERSION` to **increase**: this includes base policies, profile instructions, skills (even wording changes within a `SKILL.md`), and the effective contents of `manifest.json` or `profile.yml`. Update the single canonical `VERSION`, `manifest.json`'s `governance_version`, and the profile's `governance_version` together. A downgrade or mismatch fails the check. The gate enforces a strictly increasing SemVer number, but the author and reviewers choose the correct PATCH/MINOR/MAJOR level using the criteria above; it does not infer compatibility from a text diff.
+
+Changes restricted to independent documentation such as `agent-governance/README.md`, repository READMEs or `docs/`, to workflow/automation implementation, or to JSON formatting of the manifest do **not** require a version bump. Updating only the two derived version fields alongside `VERSION` is also not treated as a separate contract change. Ambiguous edits inside distributed skill/policy resources are **conservatively contractual**; do not disguise such edits as documentation-only. The comparison is against the exact PR base, not a hard-coded previous version. The same validation runs in CI for all PRs without a path-filter deadlock; on `main` pushes, its regression suite runs but PR base comparison is skipped.
+
+Run `bash .github/scripts/test-agent-governance-version.sh` for isolated Git regression fixtures. To check the current branch against a local base, run `bash .github/scripts/check-agent-governance-version.sh "$(git rev-parse main)"` from the repository root, when that commit is an ancestor of HEAD.
 
 A consumer should update governance through a reviewed Pull Request. Do not auto-merge governance changes.
 

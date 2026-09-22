@@ -73,6 +73,7 @@ O workflow [`dotnet-sdk-sync.yml`](.github/workflows/dotnet-sdk-sync.yml) fornec
 A política atual é deliberadamente conservadora:
 
 - verifica somente o `global.json` localizado na raiz do repositório;
+- processa somente repositórios públicos; repositórios não públicos são reduzidos a uma contagem agregada anônima antes de qualquer processamento ou relatório específico do repositório;
 - ignora repositórios arquivados e forks;
 - ignora SDKs preview;
 - mantém as atualizações dentro do mesmo canal `major.minor`;
@@ -85,6 +86,8 @@ A política atual é deliberadamente conservadora:
 A execução agendada ocorre toda segunda-feira às 09:00 em `America/Sao_Paulo` (12:00 UTC).
 
 Esse workflow é uma automação de manutenção e não um arquivo de comunidade herdado automaticamente pelos demais repositórios. Ele consulta ativamente os repositórios através da instalação da GitHub App e cria Pull Requests individuais quando encontra uma atualização elegível do SDK.
+
+Como este control plane é público, a sincronização de SDK trata a visibilidade do repositório como uma trust boundary. A saída da descoberta da instalação serializa metadados completos somente quando a visibilidade é explicitamente `public`; valores private, internal, ausentes ou de qualquer outra forma não públicos são convertidos imediatamente em um marcador anônimo. Logs públicos e o Job Summary expõem apenas a contagem agregada de repositórios não públicos ignorados, e o loop de sincronização não realiza operações de leitura ou escrita nesses repositórios.
 
 ### Inventário central de repositórios .NET
 

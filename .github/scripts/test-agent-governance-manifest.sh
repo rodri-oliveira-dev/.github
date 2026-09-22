@@ -49,7 +49,37 @@ assert_invalid no-local-authority '.skills[0].distribution.local_authority = fal
 assert_invalid wrong-upstream '.skills[0].owner.path = ".agents/skills/other/SKILL.md"'
 assert_invalid unowned-auto '.skills[4].distribution.mode = "pull-request-existing"'
 assert_invalid profile-source '.profiles[0].source = "agent-governance/profiles/other/AGENTS.md"'
+assert_invalid profile-owner-missing 'del(.profiles[0].owner)'
+assert_invalid profile-owner-upstream '.profiles[0].owner.type = "upstream"'
+assert_invalid profile-owner-extra '.profiles[0].owner.repository = "example/repository"'
+assert_invalid profile-owner-type '.profiles[0].owner = "central"'
 assert_invalid missing-field 'del(.skills[0].owner)'
+
+# Exercise the real, shared validator against an isolated copy of the catalog.
+# Renaming a SKILL.md must fail even when the manifest/path remains unchanged,
+# protecting both the required check and the automation preflight.
+fixture_catalog="$scratch/catalog"
+mkdir -p "$fixture_catalog/agent-governance"
+cp "$manifest" "$fixture_catalog/$manifest"
+cp "$version" "$fixture_catalog/$version"
+while IFS= read -r source; do
+  mkdir -p "$fixture_catalog/$(dirname "$source")"
+  cp "$source" "$fixture_catalog/$source"
+done < <(jq -r '.profiles[].source, .skills[].source' "$manifest")
+
+canonical_skill="$(jq -r '.skills[0].source' "$manifest")"
+expected_name="$(jq -r '.skills[0].name' "$manifest")"
+grep -Fqx "name: $expected_name" "$fixture_catalog/$canonical_skill"
+sed -i "s/^name: $expected_name$/name: renamed-fixture-skill/" "$fixture_catalog/$canonical_skill"
+if (
+  cd "$fixture_catalog"
+  agent_governance_validate_manifest "agent-governance/manifest.json" "agent-governance/VERSION"
+) > "$scratch/mismatch-output" 2>&1; then
+  echo "::error title=Canonical mismatch accepted::Renamed SKILL.md passed manifest preflight." >&2
+  exit 1
+fi
+grep -Fq 'Skill name mismatch' "$scratch/mismatch-output"
+grep -Fq "$canonical_skill" "$scratch/mismatch-output"
 
 if agent_governance_mappings unknown "$manifest" >/dev/null 2>&1; then
   echo "::error::Unknown mapping direction should fail." >&2

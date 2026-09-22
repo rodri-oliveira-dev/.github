@@ -224,7 +224,7 @@ jq -e '
     and ($inventory.problems | map(.stage) == ["inspection_timeout"])
     and ($inventory.projects | map(.status) == ["inspection_timeout", "ok"])
 ' "$report" >/dev/null
-grep -Fq 'TIMEOUT rodri-oliveira-dev/hung-repository' "$fixture_root/production-output.log"
+grep -Eq 'TIMEOUT[[:space:]]+rodri-oliveira-dev/hung-repository' "$fixture_root/production-output.log"
 grep -Fq 'OK' "$fixture_root/production-output.log"
 grep -Fq 'rodri-oliveira-dev/healthy-repository' "$fixture_root/production-output.log"
 grep -Fq '| Repository inspection timeouts | 1 |' "$fixture_root/step-summary.md"

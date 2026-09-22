@@ -323,7 +323,7 @@ jobs:
 
             channel="$(sdk_channel "$current")"
 
-            metadata="$(
+            if ! metadata="$(
               jq -r --arg channel "$channel" '
                 .["releases-index"][]
                 | select(.["channel-version"] == $channel)
@@ -338,7 +338,12 @@ jobs:
                   ]
                 | @tsv
               ' "$release_index" | head -n 1
-            )"
+            )"; then
+              repository_errors=$((repository_errors + 1))
+              echo "::error title=Release metadata parsing failed::$repo could not read its SDK channel."
+              log_result "$repo" "Error — release metadata parsing failed"
+              continue
+            fi
 
             if [[ -z "$metadata" ]]; then
               repositories_current=$((repositories_current + 1))
@@ -507,12 +512,18 @@ jobs:
             fi
 
             sdk_worktree="$(mktemp -d)"
-            git -C "$sdk_worktree" init --quiet
-            git -C "$sdk_worktree" remote add origin "https://github.com/$repo.git"
+            if ! git -C "$sdk_worktree" init --quiet || ! git -C "$sdk_worktree" remote add origin "https://github.com/$repo.git"; then
+              repository_errors=$((repository_errors + 1))
+              echo "::error title=SDK worktree initialization failed::$repo could not initialize the temporary repository."
+              log_result "$repo" "Error — git initialization failed"
+              rm -rf -- "$sdk_worktree"
+              sdk_worktree=""
+              continue
+            fi
 
             if ! git -C "$sdk_worktree" fetch --quiet --depth=1 \
               origin "refs/heads/$UPDATE_BRANCH:refs/remotes/origin/$UPDATE_BRANCH"; then
-              ownership_errors=$((ownership_errors + 1))
+              repository_errors=$((repository_errors + 1))
               echo "::error title=Automation branch fetch failed::Unable to fetch $repo/$UPDATE_BRANCH after ownership verification."
               log_result "$repo" "Skipped — unable to fetch proven automation branch"
               rm -rf -- "$sdk_worktree"
@@ -520,7 +531,14 @@ jobs:
               continue
             fi
 
-            fetched_branch_sha="$(git -C "$sdk_worktree" rev-parse "refs/remotes/origin/$UPDATE_BRANCH")"
+            if ! fetched_branch_sha="$(git -C "$sdk_worktree" rev-parse "refs/remotes/origin/$UPDATE_BRANCH")"; then
+              repository_errors=$((repository_errors + 1))
+              echo "::error title=SDK branch resolution failed::$repo/$UPDATE_BRANCH could not be resolved."
+              log_result "$repo" "Error — branch resolution failed"
+              rm -rf -- "$sdk_worktree"
+              sdk_worktree=""
+              continue
+            fi
             if [[ "$fetched_branch_sha" != "$branch_parent_sha" ]]; then
               ownership_errors=$((ownership_errors + 1))
               echo "::error title=Automation branch changed before SDK refresh::$repo/$UPDATE_BRANCH moved after ownership verification."
@@ -530,7 +548,14 @@ jobs:
               continue
             fi
 
-            git -C "$sdk_worktree" checkout --quiet --detach "$branch_parent_sha"
+            if ! git -C "$sdk_worktree" checkout --quiet --detach "$branch_parent_sha"; then
+              repository_errors=$((repository_errors + 1))
+              echo "::error title=SDK checkout failed::$repo/$UPDATE_BRANCH could not be checked out."
+              log_result "$repo" "Error — checkout failed"
+              rm -rf -- "$sdk_worktree"
+              sdk_worktree=""
+              continue
+            fi
 
             if [[ ! -f "$sdk_worktree/$GLOBAL_JSON_PATH" ]]; then
               ownership_errors=$((ownership_errors + 1))
@@ -569,7 +594,16 @@ jobs:
             case "$branch_relation" in
               current)
                 if [[ "$pr_action" == "updated" ]]; then
-                  reconcile_existing_pr_metadata "$repo" "$AUTOMATION_PR_NUMBER" "$desired_pr_title" "$pr_body"
+                  if ! reconcile_existing_pr_metadata "$repo" "$AUTOMATION_PR_NUMBER" "$desired_pr_title" "$pr_body"; then
+                    repository_errors=$((repository_errors + 1))
+                    echo "::error title=SDK PR reconciliation failed::$repo PR #$AUTOMATION_PR_NUMBER metadata could not be synchronized."
+                    log_result "$repo" "Error — PR metadata reconciliation failed"
+                    rm -f -- "$pr_body"
+                    pr_body=""
+                    rm -rf -- "$sdk_worktree"
+                    sdk_worktree=""
+                    continue
+                  fi
                   if [[ "$RECONCILED_PR_CHANGED" == "true" ]]; then
                     pull_requests_updated=$((pull_requests_updated + 1))
                     log_result "$repo" "PR metadata updated: $RECONCILED_PR_URL ($current → $latest)"
@@ -630,10 +664,19 @@ jobs:
               continue
             fi
 
-            git -C "$sdk_worktree" config user.name "dotnet-sdk-sync[bot]"
-            git -C "$sdk_worktree" config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git -C "$sdk_worktree" add -- "$GLOBAL_JSON_PATH"
-            git -C "$sdk_worktree" commit --quiet -m "chore: update .NET SDK from $current to $latest"
+            if ! git -C "$sdk_worktree" config user.name "dotnet-sdk-sync[bot]" ||
+              ! git -C "$sdk_worktree" config user.email "41898282+github-actions[bot]@users.noreply.github.com" ||
+              ! git -C "$sdk_worktree" add -- "$GLOBAL_JSON_PATH" ||
+              ! git -C "$sdk_worktree" commit --quiet -m "chore: update .NET SDK from $current to $latest"; then
+              repository_errors=$((repository_errors + 1))
+              echo "::error title=SDK commit failed::$repo could not stage or commit its update."
+              log_result "$repo" "Error — git commit failed"
+              rm -f -- "$pr_body"
+              pr_body=""
+              rm -rf -- "$sdk_worktree"
+              sdk_worktree=""
+              continue
+            fi
 
             if ! git -C "$sdk_worktree" push --quiet \
               --force-with-lease="refs/heads/$UPDATE_BRANCH:$branch_parent_sha" \
@@ -653,7 +696,14 @@ jobs:
             files_updated=$((files_updated + 1))
 
             if [[ "$pr_action" == "updated" ]]; then
-              reconcile_existing_pr_metadata "$repo" "$AUTOMATION_PR_NUMBER" "$desired_pr_title" "$pr_body"
+              if ! reconcile_existing_pr_metadata "$repo" "$AUTOMATION_PR_NUMBER" "$desired_pr_title" "$pr_body"; then
+                repository_errors=$((repository_errors + 1))
+                echo "::error title=SDK PR reconciliation failed::$repo PR #$AUTOMATION_PR_NUMBER metadata could not be synchronized after the branch push."
+                log_result "$repo" "Error — PR metadata reconciliation failed (branch was refreshed)"
+                rm -f -- "$pr_body"
+                pr_body=""
+                continue
+              fi
               if [[ "$RECONCILED_PR_CHANGED" == "true" ]]; then
                 pull_requests_updated=$((pull_requests_updated + 1))
                 log_result "$repo" "PR metadata updated: $RECONCILED_PR_URL ($current → $latest)"
@@ -661,14 +711,21 @@ jobs:
                 log_result "$repo" "PR branch refreshed: $RECONCILED_PR_URL ($current → $latest); metadata already current"
               fi
             else
-              pr_url="$(
+              if ! pr_url="$(
                 gh pr create \
                   --repo "$repo" \
                   --base "$default_branch" \
                   --head "$UPDATE_BRANCH" \
                   --title "$desired_pr_title" \
                   --body-file "$pr_body"
-              )"
+              )"; then
+                repository_errors=$((repository_errors + 1))
+                echo "::error title=SDK PR creation failed::$repo/$UPDATE_BRANCH was pushed but a PR could not be opened; the reserved branch was left untouched for manual recovery."
+                log_result "$repo" "Error — PR creation failed; branch requires manual recovery"
+                rm -f -- "$pr_body"
+                pr_body=""
+                continue
+              fi
               pull_requests_created=$((pull_requests_created + 1))
               log_result "$repo" "PR created: $pr_url ($current → $latest)"
             fi
@@ -687,6 +744,10 @@ jobs:
             echo "::error::$ownership_errors repository mutation(s) were blocked because automation branch ownership could not be proven."
           fi
 
-          if [[ "$sdk_policy_errors" -gt 0 || "$ownership_errors" -gt 0 ]]; then
+          if [[ "$repository_errors" -gt 0 ]]; then
+            echo "::error::$repository_errors repository operation(s) failed; remaining repositories were still processed."
+          fi
+
+          if [[ "$sdk_policy_errors" -gt 0 || "$ownership_errors" -gt 0 || "$repository_errors" -gt 0 ]]; then
             exit 1
           fi

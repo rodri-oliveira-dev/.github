@@ -17,6 +17,7 @@ on:
       - ".github/workflows/sync-agent-skills.yml"
       - ".github/workflows/distribute-agent-skills.yml"
       - ".github/workflows/dotnet-sdk-sync.yml"
+      - ".github/workflows/dotnet-repository-inventory.yml"
       - "README.md"
       - "README.pt-BR.md"
 
@@ -151,6 +152,45 @@ jobs:
             fi
           done < <(sed -n 's/^  - source: //p' "$profile")
 
+
+
+      - name: Validate DotNetRepoInspector immutable pin
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          inventory=".github/workflows/dotnet-repository-inventory.yml"
+
+          inspector_version="$(sed -n 's/^[[:space:]]*INSPECTOR_VERSION: "\([^"]*\)"/\1/p' "$inventory" | head -n 1)"
+          inspector_sha="$(sed -n 's/^[[:space:]]*INSPECTOR_SHA: "\([0-9a-f]*\)"/\1/p' "$inventory" | head -n 1)"
+
+          if [[ ! "$inspector_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Inventory must declare DotNetRepoInspector version as MAJOR.MINOR.PATCH."
+            exit 1
+          fi
+
+          if [[ ! "$inspector_sha" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::Inventory must pin DotNetRepoInspector to a full 40-character commit SHA."
+            exit 1
+          fi
+
+          grep -Fq 'origin "$INSPECTOR_SHA"' "$inventory"
+          grep -Fq 'git -C .inspector checkout --detach --quiet FETCH_HEAD' "$inventory"
+          grep -Fq 'resolved_sha="$(git -C .inspector rev-parse HEAD)"' "$inventory"
+          grep -Fq 'inspector_version: $inspector_version' "$inventory"
+          grep -Fq 'inspector_sha: $inspector_sha' "$inventory"
+          grep -Fq '"inspector_version"' "$inventory"
+          grep -Fq '"inspector_sha"' "$inventory"
+
+          if grep -Eq -- '--branch[[:space:]]+(main|master)([[:space:]]|\\|$)' "$inventory"; then
+            echo "::error::DotNetRepoInspector checkout must not use main or master."
+            exit 1
+          fi
+
+          if grep -Eq 'INSPECTOR_(REF|SHA): "(main|master)"' "$inventory"; then
+            echo "::error::DotNetRepoInspector provenance must not use a mutable branch."
+            exit 1
+          fi
 
       - name: Validate secret-scan size coverage policy
         shell: bash

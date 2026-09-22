@@ -1,0 +1,33 @@
+name: Secret scan size coverage
+description: Fail-closed coverage policy for tracked Git blobs larger than the scanner target-size limit.
+
+inputs:
+  log-opts:
+    description: Git revision selector used by the secret scanner, such as --all or base..head.
+    required: true
+  max-target-megabytes:
+    description: Maximum tracked Git blob size that the downstream scanner will inspect.
+    required: false
+    default: "20"
+
+outputs:
+  result:
+    description: covered or coverage-failure.
+    value: ${{ steps.coverage.outputs.result }}
+  oversized-count:
+    description: Number of oversized tracked Git blob objects in the selected scope.
+    value: ${{ steps.coverage.outputs.oversized-count }}
+  largest-oversized-bytes:
+    description: Largest oversized blob size in bytes, or 0 when coverage is complete.
+    value: ${{ steps.coverage.outputs.largest-oversized-bytes }}
+
+runs:
+  using: composite
+  steps:
+    - name: Check tracked Git blob sizes
+      id: coverage
+      shell: bash
+      env:
+        LOG_OPTS: ${{ inputs.log-opts }}
+        MAX_TARGET_MEGABYTES: ${{ inputs.max-target-megabytes }}
+      run: bash "$GITHUB_ACTION_PATH/check.sh"

@@ -68,12 +68,11 @@ jobs:
           fi
           source "$OWNERSHIP_POLICY"
 
-          mappings=(
-            "dotnet-issue-implementation|.agents/skills/dotnet-issue-implementation/SKILL.md|agent-governance/skills/dotnet/dotnet-issue-implementation/SKILL.md"
-            "dotnet-bug-investigation|.agents/skills/dotnet-bug-investigation/SKILL.md|agent-governance/skills/dotnet/dotnet-bug-investigation/SKILL.md"
-            "dotnet-pr-review|.agents/skills/dotnet-pr-review/SKILL.md|agent-governance/skills/dotnet/dotnet-pr-review/SKILL.md"
-            "dotnet-security-review|.agents/skills/dotnet-security-review/SKILL.md|agent-governance/skills/dotnet/dotnet-security-review/SKILL.md"
-          )
+          source "$GITHUB_WORKSPACE/.github/scripts/agent-governance-manifest.sh"
+          manifest="$GITHUB_WORKSPACE/agent-governance/manifest.json"
+          agent_governance_validate_manifest "$manifest" "$GITHUB_WORKSPACE/agent-governance/VERSION"
+          mapping_lines="$(agent_governance_mappings upstream "$manifest")"
+          mapfile -t mappings <<< "$mapping_lines"
 
           source_sha="$(
             gh api \

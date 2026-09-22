@@ -18,6 +18,7 @@ It is intentionally separate from repository-local runtime files. Neither GitHub
 ```text
 agent-governance/
 ├── VERSION
+├── manifest.json
 ├── README.md
 ├── base/
 │   └── AGENTS.base.md
@@ -41,11 +42,19 @@ agent-governance/
 
 ## Composition model
 
-`base/AGENTS.base.md` contains cross-repository policy that should remain small. A profile contains a ready-to-materialize `AGENTS.md` plus a manifest describing which skills belong to that profile.
+`base/AGENTS.base.md` contains cross-repository policy that should remain small. A profile contains a ready-to-materialize `AGENTS.md` and an identity file, while the **single canonical `manifest.json`** describes which skills belong to the profile and how each artifact is managed.
 
 The initial profile is `dotnet-library`, derived from the agent baseline proven in `dotnet-library-template`.
 
 The profile is the distributable contract. Repository-local instructions may extend or override it when the project has different architecture, tooling, release, compatibility, or security requirements.
+
+
+
+## Canonical artifact manifest
+
+[`manifest.json`](manifest.json) is the sole source of truth for schema version, the governance contract version, profile instructions and the nine skills. Every entry declares a canonical `source`, a consumer `target`, upstream ownership (`owner.type: upstream` with repository/path, or `central`), and its own `distribution` policy. `pull-request-existing` is restricted to the four upstream-owned managed skills: central synchronization reviews upstream updates first, then consumer distribution opens a PR **only where the target file already exists**. All other skills and the profile `AGENTS.md` remain `manual`. Every artifact disables auto-merge and preserves `local_authority`. The small `profiles/dotnet-library/profile.yml` retains identity/status/version and points to the canonical manifest rather than duplicating the skill catalog or claiming the entire profile uses one distribution mode.
+
+The upstream and consumer workflows validate the manifest and derive their actual file mappings through `.github/scripts/agent-governance-manifest.sh` using `jq`. An invalid schema, version, source, target or ownership policy blocks mutation. The distributor's broad push path filter wakes it for canonical skill changes, but **only** entries with `distribution.mode: pull-request-existing` are processed; manual artifacts never become automatically managed by triggering the workflow. Run `bash .github/scripts/test-agent-governance-manifest.sh` locally to validate the catalog, mappings and negative fixtures. Future additions/ownership changes require a reviewed update to the manifest and canonical source files; contract-version enforcement is tracked separately in #18.
 
 ## Versioning
 
@@ -76,7 +85,7 @@ Other canonical skills remain centrally maintained unless their ownership is exp
 
 ## Consumer distribution
 
-After an upstream synchronization Pull Request is reviewed and merged into `main`, `.github/workflows/distribute-agent-skills.yml` is triggered by changes to the four managed canonical skill paths. It can also be invoked manually in dry-run mode.
+After an upstream synchronization Pull Request is reviewed and merged into `main`, `.github/workflows/distribute-agent-skills.yml` is triggered by changes to `agent-governance/manifest.json` or any file under `agent-governance/skills/`. It can also be invoked manually in dry-run mode. The trigger is broader than the managed set: the validated manifest still limits automatic PR distribution to the four `pull-request-existing` skills.
 
 The distributor enumerates public repositories visible to the configured GitHub App and inspects only these existing consumer paths:
 

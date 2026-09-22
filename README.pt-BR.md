@@ -70,6 +70,8 @@ Branches reservadas de automação usam um contrato explícito de provenance em 
 
 ## Automações centrais de .NET
 
+O [manifesto canônico de agent governance](agent-governance/manifest.json) define as nove skills e a política de ownership/distribuição por artefato. Quatro skills mantidas no upstream são sincronizadas e oferecidas a consumidores existentes por Pull Request revisado; as outras cinco e as instruções do perfil permanecem manuais. A [documentação de agent governance](agent-governance/README.md) descreve o schema e a validação local.
+
 ### Sincronização central do .NET SDK
 
 O workflow [`dotnet-sdk-sync.yml`](.github/workflows/dotnet-sdk-sync.yml) fornece manutenção centralizada de SDK para os repositórios acessíveis à GitHub App configurada.
@@ -187,7 +189,7 @@ O workflow sincroniza somente esses quatro arquivos em allowlist, valida os meta
 
 ### Distribuição para consumidores
 
-Depois que uma atualização de skill gerenciada é revisada e mergeada na `.github/main`, o [`distribute-agent-skills.yml`](.github/workflows/distribute-agent-skills.yml) executa automaticamente porque seu trigger de `push` está restrito aos quatro caminhos gerenciados.
+Depois que uma atualização de skill gerenciada é revisada e mergeada na `.github/main`, o [`distribute-agent-skills.yml`](.github/workflows/distribute-agent-skills.yml) executa automaticamente porque o gatilho de `push` contempla `agent-governance/manifest.json` e `agent-governance/skills/**`. Esse gatilho mais amplo não aumenta o conjunto distribuído: somente as skills marcadas como `pull-request-existing` no manifesto validado são elegíveis.
 
 O distribuidor varre repositórios públicos visíveis para a GitHub App configurada e verifica se cada projeto já possui alguma skill gerenciada em `.agents/skills/<skill>/SKILL.md`. Os arquivos existentes são comparados byte-for-byte com a versão central aprovada.
 

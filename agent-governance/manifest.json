@@ -1,0 +1,155 @@
+{
+  "schema_version": 1,
+  "governance_version": "1.1.0",
+  "profiles": [
+    {
+      "name": "dotnet-library",
+      "source": "agent-governance/profiles/dotnet-library/AGENTS.md",
+      "target": "AGENTS.md",
+      "owner": {
+        "type": "central"
+      },
+      "distribution": {
+        "mode": "manual",
+        "auto_merge": false,
+        "local_authority": true
+      }
+    }
+  ],
+  "skills": [
+    {
+      "name": "dotnet-issue-implementation",
+      "profile": "dotnet-library",
+      "source": "agent-governance/skills/dotnet/dotnet-issue-implementation/SKILL.md",
+      "target": ".agents/skills/dotnet-issue-implementation/SKILL.md",
+      "owner": {
+        "type": "upstream",
+        "repository": "rodri-oliveira-dev/dotnet-library-template",
+        "path": ".agents/skills/dotnet-issue-implementation/SKILL.md"
+      },
+      "distribution": {
+        "mode": "pull-request-existing",
+        "auto_merge": false,
+        "local_authority": true
+      }
+    },
+    {
+      "name": "dotnet-bug-investigation",
+      "profile": "dotnet-library",
+      "source": "agent-governance/skills/dotnet/dotnet-bug-investigation/SKILL.md",
+      "target": ".agents/skills/dotnet-bug-investigation/SKILL.md",
+      "owner": {
+        "type": "upstream",
+        "repository": "rodri-oliveira-dev/dotnet-library-template",
+        "path": ".agents/skills/dotnet-bug-investigation/SKILL.md"
+      },
+      "distribution": {
+        "mode": "pull-request-existing",
+        "auto_merge": false,
+        "local_authority": true
+      }
+    },
+    {
+      "name": "dotnet-pr-review",
+      "profile": "dotnet-library",
+      "source": "agent-governance/skills/dotnet/dotnet-pr-review/SKILL.md",
+      "target": ".agents/skills/dotnet-pr-review/SKILL.md",
+      "owner": {
+        "type": "upstream",
+        "repository": "rodri-oliveira-dev/dotnet-library-template",
+        "path": ".agents/skills/dotnet-pr-review/SKILL.md"
+      },
+      "distribution": {
+        "mode": "pull-request-existing",
+        "auto_merge": false,
+        "local_authority": true
+      }
+    },
+    {
+      "name": "dotnet-security-review",
+      "profile": "dotnet-library",
+      "source": "agent-governance/skills/dotnet/dotnet-security-review/SKILL.md",
+      "target": ".agents/skills/dotnet-security-review/SKILL.md",
+      "owner": {
+        "type": "upstream",
+        "repository": "rodri-oliveira-dev/dotnet-library-template",
+        "path": ".agents/skills/dotnet-security-review/SKILL.md"
+      },
+      "distribution": {
+        "mode": "pull-request-existing",
+        "auto_merge": false,
+        "local_authority": true
+      }
+    },
+    {
+      "name": "dotnet-refactoring-engineer",
+      "profile": "dotnet-library",
+      "source": "agent-governance/skills/dotnet/dotnet-refactoring-engineer/SKILL.md",
+      "target": ".agents/skills/dotnet-refactoring-engineer/SKILL.md",
+      "owner": {
+        "type": "central"
+      },
+      "distribution": {
+        "mode": "manual",
+        "auto_merge": false,
+        "local_authority": true
+      }
+    },
+    {
+      "name": "coverage-analysis",
+      "profile": "dotnet-library",
+      "source": "agent-governance/skills/dotnet/coverage-analysis/SKILL.md",
+      "target": ".agents/skills/coverage-analysis/SKILL.md",
+      "owner": {
+        "type": "central"
+      },
+      "distribution": {
+        "mode": "manual",
+        "auto_merge": false,
+        "local_authority": true
+      }
+    },
+    {
+      "name": "test-anti-patterns",
+      "profile": "dotnet-library",
+      "source": "agent-governance/skills/dotnet/test-anti-patterns/SKILL.md",
+      "target": ".agents/skills/test-anti-patterns/SKILL.md",
+      "owner": {
+        "type": "central"
+      },
+      "distribution": {
+        "mode": "manual",
+        "auto_merge": false,
+        "local_authority": true
+      }
+    },
+    {
+      "name": "dotnet-library-change",
+      "profile": "dotnet-library",
+      "source": "agent-governance/skills/dotnet-library/dotnet-library-change/SKILL.md",
+      "target": ".agents/skills/dotnet-library-change/SKILL.md",
+      "owner": {
+        "type": "central"
+      },
+      "distribution": {
+        "mode": "manual",
+        "auto_merge": false,
+        "local_authority": true
+      }
+    },
+    {
+      "name": "ci-release-governance",
+      "profile": "dotnet-library",
+      "source": "agent-governance/skills/dotnet-library/ci-release-governance/SKILL.md",
+      "target": ".agents/skills/ci-release-governance/SKILL.md",
+      "owner": {
+        "type": "central"
+      },
+      "distribution": {
+        "mode": "manual",
+        "auto_merge": false,
+        "local_authority": true
+      }
+    }
+  ]
+}

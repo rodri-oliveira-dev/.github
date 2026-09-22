@@ -12,6 +12,8 @@ on:
       - ".github/actions/secret-scan-size-policy/**"
       - ".github/scripts/automation-branch-ownership.sh"
       - ".github/scripts/dotnet-sdk-sync-policy.sh"
+      - ".github/scripts/batch-retry.sh"
+      - ".github/scripts/test-batch-failure-isolation.sh"
       - ".github/workflows/agent-governance-validation.yml"
       - ".github/workflows/reusable-secret-scan.yml"
       - ".github/workflows/control-plane-secret-scan.yml"
@@ -71,6 +73,8 @@ jobs:
             .github/actions/secret-scan-size-policy/action.yml
             .github/actions/secret-scan-size-policy/check.sh
             .github/scripts/dotnet-sdk-sync-policy.sh
+            .github/scripts/batch-retry.sh
+            .github/scripts/test-batch-failure-isolation.sh
             .github/workflows/reusable-secret-scan.yml
             .github/workflows/control-plane-secret-scan.yml
           )
@@ -361,6 +365,35 @@ jobs:
             echo "::error::SDK refresh idempotency must compare sdk.version semantically, not raw JSON formatting."
             exit 1
           fi
+
+      - name: Validate cross-repository batch failure isolation
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          for script in .github/scripts/batch-retry.sh .github/scripts/test-batch-failure-isolation.sh; do
+            bash -n "$script"
+          done
+
+          # Both automation steps must remain valid standalone Bash after
+          # extracting their inline run blocks from YAML.
+          fixture_root="$(mktemp -d)"
+          trap 'rm -rf -- "$fixture_root"' EXIT
+          for workflow in .github/workflows/dotnet-sdk-sync.yml .github/workflows/distribute-agent-skills.yml; do
+            filename="$(basename "$workflow")"
+            awk '
+              found {
+                if ($0 ~ /^[[:space:]]*$/) { print; next }
+                if ($0 ~ /^          /) { sub(/^          /, ""); print; next }
+                exit
+              }
+              /^        run: \|$/ { found = 1 }
+            ' "$workflow" > "$fixture_root/$filename.bash"
+            [[ -s "$fixture_root/$filename.bash" ]]
+            bash -n "$fixture_root/$filename.bash"
+          done
+
+          bash .github/scripts/test-batch-failure-isolation.sh
 
       - name: Validate automation branch ownership policy
         shell: bash

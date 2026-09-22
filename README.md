@@ -87,7 +87,7 @@ Its current policy is intentionally conservative:
 - does not auto-merge generated Pull Requests;
 - supports a manual `dry_run` mode before applying changes.
 
-The scheduled run executes every Monday at 09:00 in `America/Sao_Paulo` (12:00 UTC).
+The scheduled run executes every Monday at 09:00 in `America/Sao_Paulo` (12:00 UTC). The SDK synchronization job has an explicit **90-minute wall-clock limit**. A job-level timeout cancels the run and may prevent processing remaining repositories or writing its final Summary; it does not retry or roll back an in-flight GitHub mutation. Repository-level operational errors still follow the separate batch-isolation policy below.
 
 This workflow is maintenance automation, not a default community-health file inherited automatically by other repositories. It actively evaluates repositories through the GitHub App installation and creates repository-level Pull Requests when an eligible SDK update exists.
 
@@ -121,6 +121,8 @@ The inventory identifies these project types:
 The workflow keeps Target Framework and .NET SDK data separate. A Target Framework such as `net10.0` describes what the project targets at compile/runtime level, while a configured or resolved .NET SDK such as `10.0.100` describes the SDK used to evaluate/build tooling for the repository.
 
 The inventory runs manually through `workflow_dispatch` and weekly on Wednesdays at 09:30 in `America/Sao_Paulo` (12:30 UTC), avoiding the Monday schedule used by SDK synchronization. Concurrency prevents overlapping inventory runs.
+
+**Timeouts and cancellation:** The privileged discovery job is capped at **15 minutes** and the credential-free inspection job at **120 minutes**. Inside inspection, each public repository clone has a **120-second** limit and each Inspector/MSBuild invocation has a **300-second** limit. These per-repository defaults are configured via `REPOSITORY_CLONE_TIMEOUT_SECONDS` and `REPOSITORY_INSPECTION_TIMEOUT_SECONDS` in the `inspection` job's `env` block (allowed ranges: 1–600 and 1–3600 seconds); change these values without editing the inspection logic. GNU `timeout` sends SIGTERM to the command's process group and SIGKILL after a **10-second grace period**; it is intentionally used without `--foreground` so descendants such as `dotnet` and MSBuild are terminated together. A local timeout is recorded as `clone_timeout` or `inspection_timeout` in the JSON repository/problem records, increments dedicated counters in the log and Step Summary, generates `inspection_timeout` fallback rows for discovered projects, cleans up, and proceeds to the next repository. A job-level timeout is a hard ceiling: if it fires, GitHub cancels the remaining work and the final inventory/summary/artifact may be incomplete.
 
 The workflow log shows the eligible repository count before inspection starts, then prints per-repository progress in `[current/total]` format with a short final status for each repository. Isolated repository-level failures do not interrupt inspection of the remaining repositories.
 

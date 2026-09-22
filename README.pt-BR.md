@@ -87,7 +87,7 @@ A política atual é deliberadamente conservadora:
 - não faz merge automático dos Pull Requests gerados;
 - oferece modo manual `dry_run` para validar o resultado antes de aplicar alterações.
 
-A execução agendada ocorre toda segunda-feira às 09:00 em `America/Sao_Paulo` (12:00 UTC).
+A execução agendada ocorre toda segunda-feira às 09:00 em `America/Sao_Paulo` (12:00 UTC). O job de sincronização do SDK possui **limite global explícito de 90 minutos**. Se esse limite for atingido, o GitHub cancela a execução; repositórios restantes e o Summary final podem não ser processados, e uma mutação GitHub em andamento não é automaticamente repetida ou revertida. Erros operacionais por repositório continuam seguindo a política de isolamento do lote descrita abaixo.
 
 Esse workflow é uma automação de manutenção e não um arquivo de comunidade herdado automaticamente pelos demais repositórios. Ele consulta ativamente os repositórios através da instalação da GitHub App e cria Pull Requests individuais quando encontra uma atualização elegível do SDK.
 
@@ -121,6 +121,8 @@ O inventário identifica estes tipos de projeto:
 O workflow mantém Target Framework e .NET SDK como conceitos separados. Um Target Framework como `net10.0` descreve o alvo de compilação/execução do projeto, enquanto um SDK configurado ou resolvido como `10.0.100` descreve o SDK usado pela avaliação/build tooling do repositório.
 
 O inventário pode ser executado manualmente por `workflow_dispatch` e também roda semanalmente às quartas-feiras, às 09:30 em `America/Sao_Paulo` (12:30 UTC), sem sobrepor o agendamento de segunda-feira da sincronização de SDK. A configuração de concorrência impede execuções simultâneas do inventário.
+
+**Timeouts e cancelamento:** o job privilegiado de descoberta tem limite de **15 minutos** e o job de inspeção sem credenciais tem limite de **120 minutos**. Dentro da inspeção, cada clone público é limitado a **120 segundos** e cada execução de Inspector/MSBuild a **300 segundos**. Os valores ficam em `REPOSITORY_CLONE_TIMEOUT_SECONDS` e `REPOSITORY_INSPECTION_TIMEOUT_SECONDS` no bloco `env` do job `inspection` (faixas permitidas: 1–600 e 1–3600 segundos), ajustáveis sem modificar a lógica de negócio. O GNU `timeout`, sem `--foreground`, envia SIGTERM ao grupo de processos e SIGKILL após **10 segundos de tolerância**, encerrando também descendentes `dotnet`/MSBuild. Um timeout local é identificado como `clone_timeout` ou `inspection_timeout` no JSON de repositórios/problemas, contado separadamente no log e no Step Summary e gera linhas fallback `inspection_timeout` para os projetos encontrados; os arquivos temporários são limpos e o processamento segue para o próximo repositório. O limite global do job é uma proteção final: se for atingido, a execução é cancelada e o inventário, Summary ou artifact podem ficar incompletos.
 
 O log do workflow mostra a quantidade de repositórios elegíveis antes do início da inspeção e, em seguida, imprime o progresso por repositório no formato `[atual/total]`, com um status final curto para cada repositório. Falhas isoladas no nível de um repositório não interrompem a inspeção dos demais.
 

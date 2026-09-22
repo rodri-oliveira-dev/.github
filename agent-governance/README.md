@@ -85,7 +85,7 @@ Other canonical skills remain centrally maintained unless their ownership is exp
 
 ## Consumer distribution
 
-After an upstream synchronization Pull Request is reviewed and merged into `main`, `.github/workflows/distribute-agent-skills.yml` is triggered by changes to the four managed canonical skill paths. It can also be invoked manually in dry-run mode.
+After an upstream synchronization Pull Request is reviewed and merged into `main`, `.github/workflows/distribute-agent-skills.yml` is triggered by changes to `agent-governance/manifest.json` or any file under `agent-governance/skills/`. It can also be invoked manually in dry-run mode. The trigger is broader than the managed set: the validated manifest still limits automatic PR distribution to the four `pull-request-existing` skills.
 
 The distributor enumerates public repositories visible to the configured GitHub App and inspects only these existing consumer paths:
 

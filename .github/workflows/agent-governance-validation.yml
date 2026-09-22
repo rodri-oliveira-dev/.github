@@ -207,9 +207,9 @@ jobs:
           grep -Fq 'bash "$GITHUB_ACTION_PATH/check.sh"' "$size_action"
           grep -Fq 'result=coverage-failure' "$size_policy"
           grep -Fq 'git rev-list --objects "$LOG_OPTS"' "$size_policy"
-          grep -Fq "uses: rodri-oliveira-dev/.github/.github/actions/secret-scan-size-policy@0e4fa80dc15d7e3b1ea381d629211c2e5f994b6b" "$scanner"
+          grep -Fq "uses: rodri-oliveira-dev/.github/.github/actions/secret-scan-size-policy@acb9accc2b52cd039e5dd4cc7dd0105a5b41b1d1" "$scanner"
           grep -Fq -- '--max-target-megabytes 20' "$scanner"
-          grep -Fq "uses: rodri-oliveira-dev/.github/.github/workflows/reusable-secret-scan.yml@39f63eb623b1a15e62a36474b34ef441bc6cbf28" "$caller"
+          grep -Fq "uses: rodri-oliveira-dev/.github/.github/workflows/reusable-secret-scan.yml@acb9accc2b52cd039e5dd4cc7dd0105a5b41b1d1" "$caller"
 
           if grep -Eq 'uses: .*reusable-secret-scan\.yml@(main|master|[^0-9a-f]|$)' "$caller"; then
             echo "::error::Control-plane secret scan must pin the reusable workflow to an immutable commit SHA."

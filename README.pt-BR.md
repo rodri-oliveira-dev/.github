@@ -193,6 +193,8 @@ Quando existe drift, o workflow cria ou atualiza uma única branch `chore/sync-a
 
 Como este control plane é público, repositórios não públicos são ignorados sem expor seus nomes ou metadados na saída pública do workflow. Execuções manuais começam com `dry_run: true`, permitindo inspecionar a distribuição sem escrever nos repositórios consumidores.
 
+A distribuição também isola erros por repositório público: falhas de leitura, clone, checkout, commit, push e criação/atualização de PR são registradas sem impedir os próximos consumidores. O Summary apresenta um status explícito `success`/`current`/`skipped`/`error` para cada repositório público avaliado e agrega o número de erros ao final. Somente requisições GET de leitura recebem retry transitório limitado; mutações nunca são repetidas sem proteção. A sincronização de skills upstream possui apenas o registry central como alvo, portanto uma falha nesse fluxo continua sendo falha do job, não de um lote de consumidores.
+
 A cadeia resultante é deliberadamente controlada por revisão:
 
 ```text

@@ -64,6 +64,8 @@ As integrações atuais baseadas na API incluem:
 
 O modelo de integração segue o princípio de menor privilégio: as permissões da GitHub App são restritas às necessidades de cada workflow, alterações são controladas por revisão através de Pull Requests e workflows somente leitura não modificam os repositórios inspecionados.
 
+Branches reservadas de automação usam um contrato explícito de provenance em vez de confiar no nome da branch. Uma branch existente só pode ser atualizada quando um Pull Request aberto correspondente, no mesmo repositório, contém o marker de ownership esperado e seu head SHA corresponde ao ref remoto atual; force-updates ainda usam `--force-with-lease` vinculado explicitamente ao SHA capturado. Consulte [ownership de branches de automação](docs/automation-branch-ownership.pt-BR.md) para o contrato completo e o procedimento de recuperação de branches órfãs.
+
 ## Automações centrais de .NET
 
 ### Sincronização central do .NET SDK
@@ -88,6 +90,8 @@ A execução agendada ocorre toda segunda-feira às 09:00 em `America/Sao_Paulo`
 Esse workflow é uma automação de manutenção e não um arquivo de comunidade herdado automaticamente pelos demais repositórios. Ele consulta ativamente os repositórios através da instalação da GitHub App e cria Pull Requests individuais quando encontra uma atualização elegível do SDK.
 
 Como este control plane é público, a sincronização de SDK trata a visibilidade do repositório como uma trust boundary. A saída da descoberta da instalação serializa metadados completos somente quando a visibilidade é explicitamente `public`; valores private, internal, ausentes ou de qualquer outra forma não públicos são convertidos imediatamente em um marcador anônimo. Logs públicos e o Job Summary expõem apenas a contagem agregada de repositórios não públicos ignorados, e o loop de sincronização não realiza operações de leitura ou escrita nesses repositórios.
+
+A branch reservada `chore/sync-dotnet-sdk` nunca é apagada apenas porque seu nome corresponde à convenção da automação. Se ela já existir, o workflow exige provenance válida do Pull Request antes de tratá-la como controlada pela automação; uma branch órfã ou criada manualmente permanece intacta e é reportada como erro de ownership.
 
 ### Inventário central de repositórios .NET
 

@@ -83,6 +83,8 @@ The workflow enumerates public repositories visible to the configured GitHub App
 
 When drift exists, the canonical file replaces the consumer copy byte-for-byte on the automation-owned branch `chore/sync-agent-governance`. One reviewed Pull Request is created or refreshed per repository, regardless of how many managed skills changed. Auto-merge remains disabled.
 
+Both upstream synchronization and consumer distribution prove branch ownership before any force update. The proof correlates the same-repository Pull Request, expected head/base, automation marker, and current remote SHA; the subsequent push is guarded by an explicit SHA-bound `--force-with-lease`. See [automation branch ownership](automation-branch-ownership.md) for collision and recovery handling.
+
 Because the `.github` control repository is public, non-public repositories are skipped so their names and metadata cannot leak through public workflow logs or summaries.
 
 Full profile and `AGENTS.md` synchronization remains manual at this stage.

@@ -8,9 +8,11 @@ on:
     paths:
       - "agent-governance/**"
       - "docs/agent-governance*.md"
+      - ".github/scripts/automation-branch-ownership.sh"
       - ".github/workflows/agent-governance-validation.yml"
       - ".github/workflows/sync-agent-skills.yml"
       - ".github/workflows/distribute-agent-skills.yml"
+      - ".github/workflows/dotnet-sdk-sync.yml"
       - "README.md"
       - "README.pt-BR.md"
 
@@ -141,6 +143,167 @@ jobs:
             fi
           done < <(sed -n 's/^  - source: //p' "$profile")
 
+      - name: Validate automation branch ownership policy
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          policy=".github/scripts/automation-branch-ownership.sh"
+          sdk=".github/workflows/dotnet-sdk-sync.yml"
+          upstream=".github/workflows/sync-agent-skills.yml"
+          distribution=".github/workflows/distribute-agent-skills.yml"
+
+          bash -n "$policy"
+          grep -Fq 'verify_automation_branch_ownership' "$sdk"
+          grep -Fq 'verify_automation_branch_ownership' "$upstream"
+          grep -Fq 'verify_automation_branch_ownership' "$distribution"
+          grep -Fq '<!-- automation-branch-owner: dotnet-sdk-sync/v1 -->' "$sdk"
+          grep -Fq '<!-- automation-branch-owner: sync-upstream-agent-skills/v1 -->' "$upstream"
+          grep -Fq '<!-- automation-branch-owner: distribute-agent-skills/v1 -->' "$distribution"
+          grep -Fq 'gh pr edit "$AUTOMATION_PR_NUMBER"' "$sdk"
+          grep -Fq 'branch_parent_sha="$AUTOMATION_BRANCH_SHA"' "$sdk"
+          grep -Fq 'sdk_worktree="$(mktemp -d)"' "$sdk"
+          grep -Fq -- '--force-with-lease="refs/heads/$UPDATE_BRANCH:$branch_parent_sha"' "$sdk"
+          grep -Fq 'origin "HEAD:refs/heads/$UPDATE_BRANCH"' "$sdk"
+
+          if grep -Fq -- '--method PATCH' "$sdk"; then
+            echo "::error::SDK sync must use an exact-head lease instead of ancestry-only ref PATCH semantics."
+            exit 1
+          fi
+
+          if grep -Fq -- '--method DELETE' "$sdk"; then
+            echo "::error::SDK sync must not delete a reserved branch based only on its name."
+            exit 1
+          fi
+
+          grep -Fq -- '--force-with-lease="refs/heads/$SYNC_BRANCH:$AUTOMATION_BRANCH_SHA"' "$upstream"
+          grep -Fq -- '--force-with-lease="refs/heads/$SYNC_BRANCH:"' "$upstream"
+          grep -Fq -- '--force-with-lease="refs/heads/$SYNC_BRANCH:$AUTOMATION_BRANCH_SHA"' "$distribution"
+          grep -Fq -- '--force-with-lease="refs/heads/$SYNC_BRANCH:"' "$distribution"
+
+          fake_bin="$(mktemp -d)"
+          race_root="$(mktemp -d)"
+          trap 'rm -rf "$fake_bin" "$race_root"' EXIT
+
+          cat > "$fake_bin/gh" <<'SH'
+          #!/usr/bin/env bash
+          set -Eeuo pipefail
+          case "$*" in
+            *"/git/matching-refs/"*)
+              printf '%s\n' "${FAKE_REFS_JSON:-[]}"
+              ;;
+            *"/pulls"*)
+              printf '%s\n' "${FAKE_PRS_JSON:-[]}"
+              ;;
+            *)
+              echo "unexpected fake gh invocation: $*" >&2
+              exit 1
+              ;;
+          esac
+          SH
+          chmod +x "$fake_bin/gh"
+          export PATH="$fake_bin:$PATH"
+
+          source "$policy"
+
+          fixture_repo="rodri-oliveira-dev/fixture"
+          fixture_branch="chore/fixture-automation"
+          fixture_base="main"
+          fixture_title="chore: fixture automation"
+          fixture_marker="<!-- automation-branch-owner: fixture/v1 -->"
+          owned_sha="1111111111111111111111111111111111111111"
+
+          FAKE_REFS_JSON="$(
+            jq -cn \
+              --arg ref "refs/heads/$fixture_branch" \
+              --arg sha "$owned_sha" \
+              '[{ref:$ref, object:{sha:$sha}}]'
+          )"
+          export FAKE_REFS_JSON
+
+          FAKE_PRS_JSON="$(
+            jq -cn \
+              --arg repo "$fixture_repo" \
+              --arg branch "$fixture_branch" \
+              --arg base "$fixture_base" \
+              --arg sha "$owned_sha" \
+              --arg title "$fixture_title" \
+              --arg body "$fixture_marker" \
+              '[{
+                number:42,
+                html_url:"https://github.com/example/example/pull/42",
+                title:$title,
+                body:$body,
+                head:{sha:$sha, ref:$branch, repo:{full_name:$repo}},
+                base:{ref:$base}
+              }]'
+          )"
+          export FAKE_PRS_JSON
+
+          verify_automation_branch_ownership \
+            "$fixture_repo" "$fixture_branch" "$fixture_base" "$fixture_marker" "$fixture_title"
+          [[ "$AUTOMATION_BRANCH_STATE" == "owned" ]]
+          [[ "$AUTOMATION_BRANCH_SHA" == "$owned_sha" ]]
+          [[ "$AUTOMATION_PR_NUMBER" == "42" ]]
+
+          export FAKE_PRS_JSON='[]'
+          if verify_automation_branch_ownership \
+            "$fixture_repo" "$fixture_branch" "$fixture_base" "$fixture_marker" "$fixture_title"; then
+            echo "::error::A human/unproven branch using the reserved name was incorrectly accepted."
+            exit 1
+          fi
+          grep -Fq 'ownership is unproven' <<< "$AUTOMATION_OWNERSHIP_ERROR"
+
+          export FAKE_REFS_JSON='[]'
+          export FAKE_PRS_JSON='[]'
+          verify_automation_branch_ownership \
+            "$fixture_repo" "$fixture_branch" "$fixture_base" "$fixture_marker" "$fixture_title"
+          [[ "$AUTOMATION_BRANCH_STATE" == "absent" ]]
+
+          remote="$race_root/remote.git"
+          seed="$race_root/seed"
+          racer="$race_root/racer"
+          git init --quiet --bare "$remote"
+          git clone --quiet "$remote" "$seed"
+          git -C "$seed" config user.name fixture
+          git -C "$seed" config user.email fixture@example.invalid
+          echo base > "$seed/file.txt"
+          git -C "$seed" add file.txt
+          git -C "$seed" commit --quiet -m base
+          git -C "$seed" push --quiet origin HEAD:main
+          git -C "$seed" checkout --quiet -b "$fixture_branch"
+          echo owned >> "$seed/file.txt"
+          git -C "$seed" commit --quiet -am owned
+          git -C "$seed" push --quiet origin "HEAD:refs/heads/$fixture_branch"
+
+          captured_sha="$(git ls-remote "$remote" "refs/heads/$fixture_branch" | awk '{print $1}')"
+          echo candidate >> "$seed/file.txt"
+          git -C "$seed" commit --quiet -am candidate
+
+          git clone --quiet --branch "$fixture_branch" "$remote" "$racer"
+          git -C "$racer" config user.name racer
+          git -C "$racer" config user.email racer@example.invalid
+          echo race >> "$racer/file.txt"
+          git -C "$racer" commit --quiet -am race
+          git -C "$racer" push --quiet origin "HEAD:refs/heads/$fixture_branch"
+
+          if git -C "$seed" push --quiet \
+            --force-with-lease="refs/heads/$fixture_branch:$captured_sha" \
+            origin "HEAD:refs/heads/$fixture_branch" 2>/dev/null; then
+            echo "::error::A stale force-with-lease unexpectedly overwrote a branch changed after SHA capture."
+            exit 1
+          fi
+
+          ancestor_sha="$(git -C "$seed" rev-parse "$captured_sha^")"
+          git --git-dir="$remote" update-ref "refs/heads/$fixture_branch" "$ancestor_sha"
+
+          if git -C "$seed" push --quiet \
+            --force-with-lease="refs/heads/$fixture_branch:$captured_sha" \
+            origin "HEAD:refs/heads/$fixture_branch" 2>/dev/null; then
+            echo "::error::A stale exact-head lease unexpectedly overwrote a branch reset to an ancestor."
+            exit 1
+          fi
+
       - name: Validate upstream skill sync contract
         shell: bash
         run: |
@@ -152,7 +315,8 @@ jobs:
           grep -Fq 'SOURCE_REPO: rodri-oliveira-dev/dotnet-library-template' "$sync"
           grep -Fq 'readonly SYNC_BRANCH="chore/sync-upstream-agent-skills"' "$sync"
           grep -Fq 'gh pr create' "$sync"
-          grep -Fq 'git push --force-with-lease' "$sync"
+          grep -Fq -- '--force-with-lease="refs/heads/$SYNC_BRANCH:$AUTOMATION_BRANCH_SHA"' "$sync"
+          grep -Fq -- '--force-with-lease="refs/heads/$SYNC_BRANCH:"' "$sync"
 
           managed=(
             dotnet-issue-implementation

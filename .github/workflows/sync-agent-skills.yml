@@ -59,6 +59,14 @@ jobs:
 
           readonly SYNC_BRANCH="chore/sync-upstream-agent-skills"
           readonly PR_TITLE="chore(agent-governance): sync upstream .NET skills"
+          readonly OWNERSHIP_MARKER="<!-- automation-branch-owner: sync-upstream-agent-skills/v1 -->"
+          readonly OWNERSHIP_POLICY="$GITHUB_WORKSPACE/.github/scripts/automation-branch-ownership.sh"
+
+          if [[ ! -r "$OWNERSHIP_POLICY" ]]; then
+            echo "::error title=Missing ownership policy::$OWNERSHIP_POLICY is required before branch mutation."
+            exit 1
+          fi
+          source "$OWNERSHIP_POLICY"
 
           mappings=(
             "dotnet-issue-implementation|.agents/skills/dotnet-issue-implementation/SKILL.md|agent-governance/skills/dotnet/dotnet-issue-implementation/SKILL.md"
@@ -82,7 +90,6 @@ jobs:
           fi
 
           git fetch origin main --prune
-          git fetch origin "+refs/heads/$SYNC_BRANCH:refs/remotes/origin/$SYNC_BRANCH" 2>/dev/null || true
           git checkout -B "$SYNC_BRANCH" origin/main
 
           declare -a target_files=()
@@ -146,15 +153,6 @@ jobs:
 
           git diff --check
 
-          existing_pr="$(
-            gh pr list \
-              --repo "$TARGET_REPO" \
-              --state open \
-              --head "$SYNC_BRANCH" \
-              --json number \
-              --jq '.[0].number // empty'
-          )"
-
           if git diff --quiet -- "${target_files[@]}"; then
             {
               echo "# Agent skill synchronization"
@@ -162,10 +160,6 @@ jobs:
               echo "No drift detected."
               echo
               printf 'Source: `%s@%s` (`%s`)\n' "$SOURCE_REPO" "$source_sha" "$SOURCE_REF"
-              if [[ -n "$existing_pr" ]]; then
-                echo
-                echo "Existing sync PR #$existing_pr was left unchanged."
-              fi
             } >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
@@ -190,16 +184,42 @@ jobs:
             exit 0
           fi
 
+          if ! verify_automation_branch_ownership \
+            "$TARGET_REPO" \
+            "$SYNC_BRANCH" \
+            "main" \
+            "$OWNERSHIP_MARKER" \
+            "$PR_TITLE"; then
+            echo "::error title=Automation branch ownership rejected::$AUTOMATION_OWNERSHIP_ERROR"
+            exit 1
+          fi
+
           git config user.name "agent-governance-sync[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -- "${target_files[@]}"
           git commit -m "$PR_TITLE"
 
           gh auth setup-git
-          git push --force-with-lease --set-upstream origin "$SYNC_BRANCH"
+          if [[ "$AUTOMATION_BRANCH_STATE" == "owned" ]]; then
+            if ! git push \
+              --force-with-lease="refs/heads/$SYNC_BRANCH:$AUTOMATION_BRANCH_SHA" \
+              --set-upstream origin "$SYNC_BRANCH"; then
+              echo "::error title=Automation branch changed during sync::$TARGET_REPO/$SYNC_BRANCH changed after provenance was verified."
+              exit 1
+            fi
+          else
+            if ! git push \
+              --force-with-lease="refs/heads/$SYNC_BRANCH:" \
+              --set-upstream origin "$SYNC_BRANCH"; then
+              echo "::error title=Automation branch creation race::$TARGET_REPO/$SYNC_BRANCH was created after provenance verification."
+              exit 1
+            fi
+          fi
 
           pr_body="$(mktemp)"
           {
+            echo "$OWNERSHIP_MARKER"
+            echo
             echo "## Automated agent skill synchronization"
             echo
             echo "This Pull Request synchronizes the curated upstream-owned .NET skills into the central agent-governance registry."
@@ -230,12 +250,12 @@ jobs:
             echo "- The repository's Agent governance validation workflow remains the merge gate."
           } > "$pr_body"
 
-          if [[ -n "$existing_pr" ]]; then
-            gh pr edit "$existing_pr" \
+          if [[ "$AUTOMATION_BRANCH_STATE" == "owned" ]]; then
+            gh pr edit "$AUTOMATION_PR_NUMBER" \
               --repo "$TARGET_REPO" \
               --title "$PR_TITLE" \
               --body-file "$pr_body"
-            pr_url="$(gh pr view "$existing_pr" --repo "$TARGET_REPO" --json url --jq '.url')"
+            pr_url="$(gh pr view "$AUTOMATION_PR_NUMBER" --repo "$TARGET_REPO" --json url --jq '.url')"
             action="updated"
           else
             pr_url="$(

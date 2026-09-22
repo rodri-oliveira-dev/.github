@@ -83,6 +83,8 @@ O workflow percorre os repositórios públicos visíveis para a GitHub App confi
 
 Quando existe drift, o arquivo canônico substitui byte-for-byte a cópia do consumidor na branch controlada pela automação `chore/sync-agent-governance`. Um único Pull Request revisável é criado ou atualizado por repositório, independentemente de quantas skills tenham mudado. Auto-merge continua desabilitado.
 
+Tanto a sincronização upstream quanto a distribuição para consumidores comprovam o ownership da branch antes de qualquer force-update. A prova correlaciona o Pull Request no mesmo repositório, head/base esperados, marker da automação e SHA remoto atual; o push seguinte é protegido por `--force-with-lease` explicitamente vinculado ao SHA. Consulte [ownership de branches de automação](automation-branch-ownership.pt-BR.md) para tratamento de colisões e recuperação.
+
 Como o repositório de controle `.github` é público, repositórios não públicos são ignorados para evitar exposição de nomes ou metadados em logs e summaries públicos do workflow.
 
 A sincronização do perfil completo e do `AGENTS.md` continua manual nesta etapa.

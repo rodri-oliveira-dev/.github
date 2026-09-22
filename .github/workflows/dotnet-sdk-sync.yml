@@ -25,6 +25,13 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Checkout control-plane branch ownership policy
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: main
+          persist-credentials: false
+          sparse-checkout: .github/scripts
+
       - name: Create GitHub App token
         id: app-token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
@@ -45,12 +52,24 @@ jobs:
           readonly RELEASE_INDEX_URL="https://dotnetcli.blob.core.windows.net/dotnet/release-metadata/releases-index.json"
           readonly UPDATE_BRANCH="chore/sync-dotnet-sdk"
           readonly GLOBAL_JSON_PATH="global.json"
+          readonly OWNERSHIP_MARKER="<!-- automation-branch-owner: dotnet-sdk-sync/v1 -->"
+          readonly OWNERSHIP_POLICY="$GITHUB_WORKSPACE/.github/scripts/automation-branch-ownership.sh"
+
+          if [[ ! -r "$OWNERSHIP_POLICY" ]]; then
+            echo "::error title=Missing ownership policy::$OWNERSHIP_POLICY is required before cross-repository mutation."
+            exit 1
+          fi
+          source "$OWNERSHIP_POLICY"
 
           release_index="$(mktemp)"
           repositories_file="$(mktemp)"
+          sdk_worktree=""
 
           cleanup() {
             rm -f "$release_index" "$repositories_file"
+            if [[ -n "$sdk_worktree" ]]; then
+              rm -rf -- "$sdk_worktree"
+            fi
           }
           trap cleanup EXIT
 
@@ -82,10 +101,12 @@ jobs:
               echo "| Repositories with root global.json | $repositories_with_global_json |"
               echo "| Repositories already current / no automatic update | $repositories_current |"
               echo "| Repositories with updates | $repositories_with_updates |"
-              echo "| Files requiring updates | $files_updated |"
+              echo "| Files updated | $files_updated |"
               echo "| Pull requests created | $pull_requests_created |"
+              echo "| Pull requests updated | $pull_requests_updated |"
               echo "| Repositories skipped | $repositories_skipped |"
               echo "| Non-public repositories skipped | $non_public_repositories_skipped |"
+              echo "| Automation ownership errors | $ownership_errors |"
             } | tee -a "$GITHUB_STEP_SUMMARY"
           }
 
@@ -114,11 +135,14 @@ jobs:
           repositories_current=0
           repositories_with_updates=0
           pull_requests_created=0
+          pull_requests_updated=0
           repositories_skipped=0
           non_public_repositories_skipped=0
+          ownership_errors=0
           files_updated=0
 
           write_header
+          gh auth setup-git
 
           tab="$(printf '\t')"
 
@@ -251,60 +275,134 @@ jobs:
             fi
 
             repositories_with_updates=$((repositories_with_updates + 1))
-            files_updated=$((files_updated + 1))
 
             if [[ "$DRY_RUN" == "true" ]]; then
               log_result "$repo" "Dry run — $GLOBAL_JSON_PATH: $current → $latest ($release_type, $support_phase)"
               continue
             fi
 
-            existing_pr="$(
-              gh pr list \
-                --repo "$repo" \
-                --state open \
-                --head "$UPDATE_BRANCH" \
-                --json number \
-                --jq '.[0].number // empty'
-            )"
-
-            if [[ -n "$existing_pr" ]]; then
-              log_result "$repo" "Update available ($current → $latest); PR #$existing_pr already open"
+            if ! verify_automation_branch_ownership \
+              "$repo" \
+              "$UPDATE_BRANCH" \
+              "$default_branch" \
+              "$OWNERSHIP_MARKER"; then
+              ownership_errors=$((ownership_errors + 1))
+              echo "::error title=Automation branch ownership rejected::$repo: $AUTOMATION_OWNERSHIP_ERROR"
+              log_result "$repo" "Skipped — reserved branch ownership could not be proven"
               continue
             fi
 
-            default_sha="$(gh api "repos/$repo/branches/$default_branch" --jq '.commit.sha')"
+            if [[ "$AUTOMATION_BRANCH_STATE" == "owned" ]]; then
+              branch_parent_sha="$AUTOMATION_BRANCH_SHA"
+              pr_action="updated"
+            else
+              default_sha="$(gh api "repos/$repo/branches/$default_branch" --jq '.commit.sha')"
 
-            if gh api "repos/$repo/git/ref/heads/$UPDATE_BRANCH" >/dev/null 2>&1; then
-              gh api \
-                --method DELETE \
-                "repos/$repo/git/refs/heads/$UPDATE_BRANCH" \
-                >/dev/null
+              if ! gh api \
+                --method POST \
+                "repos/$repo/git/refs" \
+                -f ref="refs/heads/$UPDATE_BRANCH" \
+                -f sha="$default_sha" \
+                >/dev/null; then
+                ownership_errors=$((ownership_errors + 1))
+                echo "::error title=Automation branch creation race::$repo/$UPDATE_BRANCH appeared or changed after ownership verification."
+                log_result "$repo" "Skipped — automation branch changed during creation"
+                continue
+              fi
+
+              branch_parent_sha="$default_sha"
+              pr_action="created"
             fi
 
-            gh api \
-              --method POST \
-              "repos/$repo/git/refs" \
-              -f ref="refs/heads/$UPDATE_BRANCH" \
-              -f sha="$default_sha" \
-              >/dev/null
+            sdk_worktree="$(mktemp -d)"
+            git -C "$sdk_worktree" init --quiet
+            git -C "$sdk_worktree" remote add origin "https://github.com/$repo.git"
 
-            branch_file_response="$(gh api "repos/$repo/contents/$GLOBAL_JSON_PATH?ref=$UPDATE_BRANCH")"
-            file_sha="$(jq -r '.sha' <<< "$branch_file_response")"
-            branch_content="$(jq -r '.content' <<< "$branch_file_response" | tr -d '\n' | base64 --decode)"
+            if ! git -C "$sdk_worktree" fetch --quiet --depth=1 \
+              origin "refs/heads/$UPDATE_BRANCH:refs/remotes/origin/$UPDATE_BRANCH"; then
+              ownership_errors=$((ownership_errors + 1))
+              echo "::error title=Automation branch fetch failed::Unable to fetch $repo/$UPDATE_BRANCH after ownership verification."
+              log_result "$repo" "Skipped — unable to fetch proven automation branch"
+              rm -rf -- "$sdk_worktree"
+              sdk_worktree=""
+              continue
+            fi
+
+            fetched_branch_sha="$(git -C "$sdk_worktree" rev-parse "refs/remotes/origin/$UPDATE_BRANCH")"
+            if [[ "$fetched_branch_sha" != "$branch_parent_sha" ]]; then
+              ownership_errors=$((ownership_errors + 1))
+              echo "::error title=Automation branch changed before SDK refresh::$repo/$UPDATE_BRANCH moved after ownership verification."
+              log_result "$repo" "Skipped — automation branch changed before SDK refresh"
+              rm -rf -- "$sdk_worktree"
+              sdk_worktree=""
+              continue
+            fi
+
+            git -C "$sdk_worktree" checkout --quiet --detach "$branch_parent_sha"
+
+            if [[ ! -f "$sdk_worktree/$GLOBAL_JSON_PATH" ]]; then
+              ownership_errors=$((ownership_errors + 1))
+              echo "::error title=Unexpected SDK branch state::$repo/$UPDATE_BRANCH no longer contains $GLOBAL_JSON_PATH."
+              log_result "$repo" "Skipped — automation branch no longer contains root global.json"
+              rm -rf -- "$sdk_worktree"
+              sdk_worktree=""
+              continue
+            fi
+
+            branch_content="$(cat "$sdk_worktree/$GLOBAL_JSON_PATH")"
             updated_content="$(jq --arg version "$latest" '.sdk.version = $version' <<< "$branch_content")"
-            encoded_content="$(printf '%s\n' "$updated_content" | base64 --wrap=0)"
 
-            gh api \
-              --method PUT \
-              "repos/$repo/contents/$GLOBAL_JSON_PATH" \
-              -f message="chore: update .NET SDK from $current to $latest" \
-              -f content="$encoded_content" \
-              -f sha="$file_sha" \
-              -f branch="$UPDATE_BRANCH" \
-              >/dev/null
+            if [[ "$branch_content" == "$updated_content" ]]; then
+              if [[ "$pr_action" == "updated" ]]; then
+                log_result "$repo" "PR #$AUTOMATION_PR_NUMBER already proposes latest SDK $latest"
+                rm -rf -- "$sdk_worktree"
+                sdk_worktree=""
+                continue
+              fi
+
+              ownership_errors=$((ownership_errors + 1))
+              echo "::error title=Unexpected SDK branch state::$repo/$UPDATE_BRANCH was created but produced no SDK content change."
+              log_result "$repo" "Skipped — newly created automation branch had no SDK diff"
+              rm -rf -- "$sdk_worktree"
+              sdk_worktree=""
+              continue
+            fi
+
+            printf '%s\n' "$updated_content" > "$sdk_worktree/$GLOBAL_JSON_PATH"
+
+            if ! git -C "$sdk_worktree" diff --check; then
+              ownership_errors=$((ownership_errors + 1))
+              echo "::error title=Invalid SDK update::$repo/$GLOBAL_JSON_PATH contains whitespace errors after update."
+              log_result "$repo" "Skipped — generated SDK update failed validation"
+              rm -rf -- "$sdk_worktree"
+              sdk_worktree=""
+              continue
+            fi
+
+            git -C "$sdk_worktree" config user.name "dotnet-sdk-sync[bot]"
+            git -C "$sdk_worktree" config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git -C "$sdk_worktree" add -- "$GLOBAL_JSON_PATH"
+            git -C "$sdk_worktree" commit --quiet -m "chore: update .NET SDK from $current to $latest"
+
+            if ! git -C "$sdk_worktree" push --quiet \
+              --force-with-lease="refs/heads/$UPDATE_BRANCH:$branch_parent_sha" \
+              origin "HEAD:refs/heads/$UPDATE_BRANCH"; then
+              ownership_errors=$((ownership_errors + 1))
+              echo "::error title=Automation branch changed during SDK refresh::$repo/$UPDATE_BRANCH no longer matches the proven parent SHA."
+              log_result "$repo" "Skipped — automation branch changed during SDK refresh"
+              rm -rf -- "$sdk_worktree"
+              sdk_worktree=""
+              continue
+            fi
+
+            rm -rf -- "$sdk_worktree"
+            sdk_worktree=""
+            files_updated=$((files_updated + 1))
 
             pr_body="$(mktemp)"
             {
+              echo "$OWNERSHIP_MARKER"
+              echo
               echo "## .NET SDK update"
               echo
               echo "This PR was created automatically by the central .NET SDK synchronization workflow."
@@ -324,19 +422,34 @@ jobs:
               printf 'Release metadata source: `%s`\n' "$RELEASE_INDEX_URL"
             } > "$pr_body"
 
-            pr_url="$(
-              gh pr create \
+            if [[ "$pr_action" == "updated" ]]; then
+              gh pr edit "$AUTOMATION_PR_NUMBER" \
                 --repo "$repo" \
-                --base "$default_branch" \
-                --head "$UPDATE_BRANCH" \
                 --title "chore: update .NET SDK from $current to $latest" \
-                --body-file "$pr_body"
-            )"
+                --body-file "$pr_body" \
+                >/dev/null
+              pr_url="$(gh pr view "$AUTOMATION_PR_NUMBER" --repo "$repo" --json url --jq '.url')"
+              pull_requests_updated=$((pull_requests_updated + 1))
+              log_result "$repo" "PR updated: $pr_url ($current → $latest)"
+            else
+              pr_url="$(
+                gh pr create \
+                  --repo "$repo" \
+                  --base "$default_branch" \
+                  --head "$UPDATE_BRANCH" \
+                  --title "chore: update .NET SDK from $current to $latest" \
+                  --body-file "$pr_body"
+              )"
+              pull_requests_created=$((pull_requests_created + 1))
+              log_result "$repo" "PR created: $pr_url ($current → $latest)"
+            fi
 
             rm -f "$pr_body"
-
-            pull_requests_created=$((pull_requests_created + 1))
-            log_result "$repo" "PR created: $pr_url ($current → $latest)"
           done < "$repositories_file"
 
           write_summary
+
+          if [[ "$ownership_errors" -gt 0 ]]; then
+            echo "::error::$ownership_errors repository mutation(s) were blocked because automation branch ownership could not be proven."
+            exit 1
+          fi

@@ -8,8 +8,12 @@ on:
     paths:
       - "agent-governance/**"
       - "docs/agent-governance*.md"
+      - "docs/secret-scanning*.md"
+      - ".github/actions/secret-scan-size-policy/**"
       - ".github/scripts/automation-branch-ownership.sh"
       - ".github/workflows/agent-governance-validation.yml"
+      - ".github/workflows/reusable-secret-scan.yml"
+      - ".github/workflows/control-plane-secret-scan.yml"
       - ".github/workflows/sync-agent-skills.yml"
       - ".github/workflows/distribute-agent-skills.yml"
       - ".github/workflows/dotnet-sdk-sync.yml"
@@ -62,6 +66,10 @@ jobs:
             agent-governance/skills/dotnet-library/ci-release-governance/SKILL.md
             .github/workflows/sync-agent-skills.yml
             .github/workflows/distribute-agent-skills.yml
+            .github/actions/secret-scan-size-policy/action.yml
+            .github/actions/secret-scan-size-policy/check.sh
+            .github/workflows/reusable-secret-scan.yml
+            .github/workflows/control-plane-secret-scan.yml
           )
 
           for file in "${required[@]}"; do
@@ -142,6 +150,91 @@ jobs:
               exit 1
             fi
           done < <(sed -n 's/^  - source: //p' "$profile")
+
+
+      - name: Validate secret-scan size coverage policy
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          readonly size_action=".github/actions/secret-scan-size-policy/action.yml"
+          readonly size_policy=".github/actions/secret-scan-size-policy/check.sh"
+          readonly scanner=".github/workflows/reusable-secret-scan.yml"
+          readonly caller=".github/workflows/control-plane-secret-scan.yml"
+
+          bash -n "$size_policy"
+
+          grep -Fq 'result=coverage-failure' "$size_policy"
+          grep -Fq 'git rev-list --objects "$LOG_OPTS"' "$size_policy"
+          grep -Fq "uses: rodri-oliveira-dev/.github/.github/actions/secret-scan-size-policy@0e4fa80dc15d7e3b1ea381d629211c2e5f994b6b" "$scanner"
+          grep -Fq -- '--max-target-megabytes 20' "$scanner"
+          grep -Fq "uses: rodri-oliveira-dev/.github/.github/workflows/reusable-secret-scan.yml@39f63eb623b1a15e62a36474b34ef441bc6cbf28" "$caller"
+
+          if grep -Eq 'uses: .*reusable-secret-scan\.yml@(main|master|[^0-9a-f]|$)' "$caller"; then
+            echo "::error::Control-plane secret scan must pin the reusable workflow to an immutable commit SHA."
+            exit 1
+          fi
+
+          fixture_root="$(mktemp -d)"
+          trap 'rm -rf "$fixture_root"' EXIT
+
+          init_repo() {
+            local path="$1"
+            git init --quiet "$path"
+            git -C "$path" config user.name fixture
+            git -C "$path" config user.email fixture@example.invalid
+          }
+
+          large_repo="$fixture_root/large"
+          init_repo "$large_repo"
+
+          dd if=/dev/zero of="$large_repo/oversized.fixture" bs=1M count=21 status=none
+          printf '%s%s\n' 'gh' 'p_abcdefghijklmnopqrstuvwxyz0123456789ABCD' >> "$large_repo/oversized.fixture"
+          grep -aFq 'ghp_abcdefghijklmnopqrstuvwxyz0123456789ABCD' "$large_repo/oversized.fixture"
+
+          git -C "$large_repo" add oversized.fixture
+          git -C "$large_repo" commit --quiet -m 'large secret fixture'
+
+          large_output="$fixture_root/large-output"
+          large_summary="$fixture_root/large-summary"
+          (
+            cd "$large_repo"
+            GITHUB_OUTPUT="$large_output" \
+            GITHUB_STEP_SUMMARY="$large_summary" \
+            LOG_OPTS="--all" \
+            MAX_TARGET_MEGABYTES="20" \
+              bash "$GITHUB_WORKSPACE/$size_policy"
+          )
+
+          grep -Fxq 'result=coverage-failure' "$large_output"
+          oversized_count="$(sed -n 's/^oversized-count=//p' "$large_output")"
+          [[ "$oversized_count" -ge 1 ]]
+          grep -Fq 'Secret scan size coverage' "$large_summary"
+          grep -Fq 'fails closed instead of reporting clean' <(
+            printf '%s\n' "$(grep -F 'Secret scan coverage blocked' /dev/null 2>/dev/null || true)"
+          ) || true
+          grep -Fq 'A clean scanner result would not prove complete coverage.' "$large_summary"
+
+          small_repo="$fixture_root/small"
+          init_repo "$small_repo"
+          printf 'safe fixture\n' > "$small_repo/small.txt"
+          git -C "$small_repo" add small.txt
+          git -C "$small_repo" commit --quiet -m 'small fixture'
+
+          small_output="$fixture_root/small-output"
+          small_summary="$fixture_root/small-summary"
+          (
+            cd "$small_repo"
+            GITHUB_OUTPUT="$small_output" \
+            GITHUB_STEP_SUMMARY="$small_summary" \
+            LOG_OPTS="--all" \
+            MAX_TARGET_MEGABYTES="20" \
+              bash "$GITHUB_WORKSPACE/$size_policy"
+          )
+
+          grep -Fxq 'result=covered' "$small_output"
+          grep -Fxq 'oversized-count=0' "$small_output"
+          grep -Fq 'All tracked Git blobs in the selected scan scope are within the scanner size limit.' "$small_summary"
 
       - name: Validate automation branch ownership policy
         shell: bash

@@ -8,6 +8,7 @@ inventory="$root/.github/workflows/dotnet-repository-inventory.yml"
 sdk="$root/.github/workflows/dotnet-sdk-sync.yml"
 fixture_root="$(mktemp -d)"
 trap 'rm -rf -- "$fixture_root"' EXIT
+trap 'rc=$?; echo "::error::Timeout harness failed on line $LINENO (exit $rc): $BASH_COMMAND"; if [[ -f "$fixture_root/production-output.log" ]]; then tail -n 70 "$fixture_root/production-output.log"; fi; if [[ -f "$fixture_root/artifacts/dotnet-repository-inventory.json" ]]; then jq "{summary,repositories,problems,projects}" "$fixture_root/artifacts/dotnet-repository-inventory.json"; fi; exit "$rc"' ERR
 
 command -v timeout >/dev/null
 command -v ps >/dev/null

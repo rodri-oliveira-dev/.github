@@ -70,13 +70,28 @@ assert_reads persistent-503 503 3
 assert_reads deterministic-404 404 1
 assert_reads deterministic-422 422 1
 
-: > "$attempts"
-fixture_case="success"
-if batch_retry_http_get "$fixture_output" fake_curl --get --request POST >/dev/null 2>&1; then
-  echo "::error::Non-idempotent HTTP mutation was incorrectly accepted for retries."
-  exit 1
-fi
-[[ ! -s "$attempts" ]]
+# Every accepted form of an explicit curl method must be blocked before the
+# first request, including when --get appears in the same invocation.
+assert_mutation_rejected() {
+  : > "$attempts"
+  fixture_case="transient-503"
+  if batch_retry_http_get "$fixture_output" fake_curl --get "$@" >/dev/null 2>&1; then
+    echo "::error::Unsafe curl option was accepted for retries: $*"
+    exit 1
+  fi
+  [[ ! -s "$attempts" ]]
+}
+
+assert_mutation_rejected --request POST
+assert_mutation_rejected --request=POST
+assert_mutation_rejected -X POST
+assert_mutation_rejected -XPOST
+assert_mutation_rejected --upload-file payload
+assert_mutation_rejected -Tpayload
+assert_mutation_rejected --data payload
+assert_mutation_rejected --config path
+assert_mutation_rejected --next
+assert_mutation_rejected --form key=value
 
 # The workflows must source the production retry helper and preserve per-repo
 # mutation/transport guards. API errors, clone errors, push errors, and PR

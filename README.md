@@ -64,6 +64,8 @@ Current API-backed integrations include:
 
 The integration model follows least privilege: GitHub App permissions are scoped to each workflow's needs, writes are review-gated through Pull Requests, and read-only workflows do not modify inspected repositories.
 
+Reserved automation branches use an explicit provenance contract rather than trusting a branch name. Existing branches can be refreshed only when a matching open Pull Request from the same repository carries the expected ownership marker and its head SHA matches the current remote ref; force updates additionally use an explicit SHA-bound `--force-with-lease`. See [automation branch ownership](docs/automation-branch-ownership.md) for the full contract and orphaned-branch recovery procedure.
+
 ## Central .NET automations
 
 ### .NET SDK synchronization
@@ -88,6 +90,8 @@ The scheduled run executes every Monday at 09:00 in `America/Sao_Paulo` (12:00 U
 This workflow is maintenance automation, not a default community-health file inherited automatically by other repositories. It actively evaluates repositories through the GitHub App installation and creates repository-level Pull Requests when an eligible SDK update exists.
 
 Because this control plane is public, the SDK synchronization treats repository visibility as a trust boundary. The installation discovery output serializes full repository metadata only for entries whose visibility is explicitly `public`; private, internal, missing, or otherwise non-public visibility values are converted immediately to an anonymous sentinel. Public logs and the Job Summary expose only the aggregate count of non-public repositories skipped, and no read/write operation is performed against those repositories by the synchronization loop.
+
+The reserved `chore/sync-dotnet-sdk` branch is never deleted merely because its name matches the automation convention. If it already exists, the workflow requires valid Pull Request provenance before treating it as automation-owned; an orphaned or human-created branch is left untouched and reported as an ownership error.
 
 ### .NET repository inventory
 

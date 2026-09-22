@@ -25,7 +25,7 @@ If the branch and matching Pull Request are both absent, the branch may be creat
 
 For the Git-based agent-skill workflows, an existing automation-owned branch is refreshed with the captured remote SHA supplied explicitly to `--force-with-lease`. A concurrent push after the provenance check therefore rejects the automation push.
 
-The SDK synchronization uses a different compare-and-swap shape: it builds the SDK update commit with the proven branch SHA as its parent and advances the reserved ref with a non-forced fast-forward update. If the remote branch moved after provenance verification, the ref update is rejected. An already-open automation PR is refreshed to a newer SDK without deleting or recreating its branch, while a branch that already proposes the current latest SDK is left unchanged.
+The SDK synchronization uses the same exact-head principle through a temporary checkout of the target repository. It fetches the reserved branch, verifies that the fetched head is still the proven SHA, creates the SDK update commit in that target-repository checkout, and pushes it with `--force-with-lease="refs/heads/<branch>:<proven-sha>"`. The push succeeds only while the remote ref is exactly the SHA that passed provenance verification; a concurrent advance, reset to an ancestor, deletion, or replacement is rejected. An already-open automation PR is refreshed to a newer SDK without deleting or recreating its branch, while a branch that already proposes the current latest SDK is left unchanged.
 
 The SDK synchronization no longer deletes an existing `chore/sync-dotnet-sdk` merely because its name is reserved. An existing branch without valid provenance is left untouched and reported as an ownership error.
 

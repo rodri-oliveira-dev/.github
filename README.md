@@ -73,6 +73,7 @@ The [`dotnet-sdk-sync.yml`](.github/workflows/dotnet-sdk-sync.yml) workflow prov
 Its current policy is intentionally conservative:
 
 - checks only the repository-root `global.json`;
+- processes only public repositories; non-public repositories are reduced to an anonymous aggregate count before any repository-specific processing or reporting;
 - ignores archived repositories and forks;
 - ignores preview SDKs;
 - keeps updates within the existing `major.minor` channel;
@@ -85,6 +86,8 @@ Its current policy is intentionally conservative:
 The scheduled run executes every Monday at 09:00 in `America/Sao_Paulo` (12:00 UTC).
 
 This workflow is maintenance automation, not a default community-health file inherited automatically by other repositories. It actively evaluates repositories through the GitHub App installation and creates repository-level Pull Requests when an eligible SDK update exists.
+
+Because this control plane is public, the SDK synchronization treats repository visibility as a trust boundary. The installation discovery output serializes full repository metadata only for entries whose visibility is explicitly `public`; private, internal, missing, or otherwise non-public visibility values are converted immediately to an anonymous sentinel. Public logs and the Job Summary expose only the aggregate count of non-public repositories skipped, and no read/write operation is performed against those repositories by the synchronization loop.
 
 ### .NET repository inventory
 

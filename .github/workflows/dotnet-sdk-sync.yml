@@ -85,6 +85,7 @@ jobs:
               echo "| Files requiring updates | $files_updated |"
               echo "| Pull requests created | $pull_requests_created |"
               echo "| Repositories skipped | $repositories_skipped |"
+              echo "| Non-public repositories skipped | $non_public_repositories_skipped |"
             } | tee -a "$GITHUB_STEP_SUMMARY"
           }
 
@@ -94,8 +95,18 @@ jobs:
 
           jq -e '.["releases-index"] | type == "array"' "$release_index" >/dev/null
 
+          # Public control plane: serialize repository metadata only after visibility
+          # is evaluated. Non-public repositories become an anonymous sentinel so
+          # names, branches and other metadata never enter the processing stream.
           gh api --paginate "/installation/repositories?per_page=100" \
-            --jq '.repositories[] | [.full_name, .default_branch, (.archived | tostring), (.fork | tostring)] | @tsv' \
+            --jq '
+              .repositories[]
+              | if .visibility == "public" then
+                  ["public", .full_name, .default_branch, (.archived | tostring), (.fork | tostring)] | @tsv
+                else
+                  ["non_public"] | @tsv
+                end
+            ' \
             > "$repositories_file"
 
           repositories_scanned=0
@@ -104,11 +115,24 @@ jobs:
           repositories_with_updates=0
           pull_requests_created=0
           repositories_skipped=0
+          non_public_repositories_skipped=0
           files_updated=0
 
           write_header
 
-          while IFS=$'\t' read -r repo default_branch archived fork; do
+          tab="$(printf '\t')"
+
+          while IFS="$tab" read -r visibility_marker repo default_branch archived fork; do
+            if [[ "$visibility_marker" == "non_public" ]]; then
+              non_public_repositories_skipped=$((non_public_repositories_skipped + 1))
+              continue
+            fi
+
+            if [[ "$visibility_marker" != "public" ]]; then
+              echo "::error title=Repository discovery contract violation::Unexpected repository visibility marker."
+              exit 1
+            fi
+
             [[ -z "$repo" ]] && continue
             [[ "$repo" != "$OWNER/"* ]] && continue
 
@@ -205,7 +229,7 @@ jobs:
               continue
             fi
 
-            IFS=$'\t' read -r latest release_type support_phase <<< "$metadata"
+            IFS="$tab" read -r latest release_type support_phase <<< "$metadata"
 
             if [[ -z "$latest" || "$latest" == *-* ]]; then
               repositories_current=$((repositories_current + 1))

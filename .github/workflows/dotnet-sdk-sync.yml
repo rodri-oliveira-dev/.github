@@ -594,7 +594,7 @@ jobs:
             printf '%s\n' "$updated_content" > "$sdk_worktree/$GLOBAL_JSON_PATH"
 
             if ! git -C "$sdk_worktree" diff --check; then
-              ownership_errors=$((ownership_errors + 1))
+              sdk_policy_errors=$((sdk_policy_errors + 1))
               echo "::error title=Invalid SDK update::$repo/$GLOBAL_JSON_PATH contains whitespace errors after update."
               log_result "$repo" "Skipped — generated SDK update failed validation"
               rm -f -- "$pr_body"

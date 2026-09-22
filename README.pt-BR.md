@@ -97,6 +97,8 @@ A branch reservada `chore/sync-dotnet-sdk` nunca é apagada apenas porque seu no
 
 A cada execução, o workflow recalcula o patch estável elegível mais recente. Se o Pull Request automation-owned estiver defasado, a mesma branch e o mesmo PR são atualizados para o novo target; um segundo PR não é criado. Se a branch já contiver o `sdk.version` alvo, nenhuma alteração é feita, mesmo que a formatação do JSON seja diferente. As versões atual e alvo precisam seguir o formato numérico estável `major.minor.patch` e permanecer no mesmo canal `major.minor` antes de qualquer mutação; metadados inválidos ou estado incompatível da branch falham de forma segura.
 
+**Isolamento de falhas do lote:** erros de API, checkout, commit, push ou PR de um repositório público são registrados como `error` no Summary, e os demais repositórios continuam. Ao terminar, o job apresenta os erros agregados de operação, ownership e política de SDK e então falha se houver erros. Somente chamadas HTTP GET de leitura recebem retry para falha transitória de rede ou HTTP 429/500/502/503/504: no máximo três tentativas e backoff de 1s/2s. Erros HTTP 4xx (exceto 429), falhas de ownership e mutações Git/PR não são repetidos. Se o push ocorrer, mas a criação do PR falhar, a branch reservada é preservada e sinalizada para recuperação manual, sem exclusão ou reutilização não comprovada.
+
 ### Inventário central de repositórios .NET
 
 O workflow [`dotnet-repository-inventory.yml`](.github/workflows/dotnet-repository-inventory.yml) gera um inventário consolidado, somente leitura, dos projetos .NET existentes nos repositórios acessíveis à GitHub App configurada.
@@ -190,6 +192,8 @@ O distribuidor varre repositórios públicos visíveis para a GitHub App configu
 Quando existe drift, o workflow cria ou atualiza uma única branch `chore/sync-agent-governance` e abre um Pull Request por repositório afetado, mesmo quando várias skills mudaram ao mesmo tempo. Ele não instala skills ausentes, não altera `AGENTS.md`, não faz auto-merge e não toca arquivos específicos do projeto fora dos quatro caminhos gerenciados.
 
 Como este control plane é público, repositórios não públicos são ignorados sem expor seus nomes ou metadados na saída pública do workflow. Execuções manuais começam com `dry_run: true`, permitindo inspecionar a distribuição sem escrever nos repositórios consumidores.
+
+A distribuição também isola erros por repositório público: falhas de leitura, clone, checkout, commit, push e criação/atualização de PR são registradas sem impedir os próximos consumidores. O Summary apresenta um status explícito `success`/`current`/`skipped`/`error` para cada repositório público avaliado e agrega o número de erros ao final. Somente requisições GET de leitura recebem retry transitório limitado; mutações nunca são repetidas sem proteção. A sincronização de skills upstream possui apenas o registry central como alvo, portanto uma falha nesse fluxo continua sendo falha do job, não de um lote de consumidores.
 
 A cadeia resultante é deliberadamente controlada por revisão:
 

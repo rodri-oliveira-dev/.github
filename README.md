@@ -97,6 +97,8 @@ The reserved `chore/sync-dotnet-sdk` branch is never deleted merely because its 
 
 Each run recalculates the latest eligible stable patch. If the automation-owned Pull Request is stale, the same branch and PR are refreshed to that target; a second PR is not created. If the branch already contains the target `sdk.version`, it is left untouched even when JSON formatting differs. Both current and target versions must use stable numeric `major.minor.patch` format and remain in the same `major.minor` channel before any branch mutation; invalid metadata or an incompatible branch state fails safely.
 
+**Batch failure isolation:** A public repository's API, checkout, commit, push, or PR error is recorded as `error` in its Summary row; other repositories continue. The job reports aggregated repository/ownership/SDK policy errors and fails after the batch, rather than stopping at the first consumer. Only read-only HTTP GET calls retry for transient network failures or HTTP 429/500/502/503/504, at most three attempts with 1s/2s backoff. HTTP 4xx other than 429, ownership failures, and Git/PR mutations are not retried. If the branch push succeeds but PR creation fails, the reserved branch is preserved and reported for manual recovery, never deleted or blindly reused.
+
 ### .NET repository inventory
 
 The [`dotnet-repository-inventory.yml`](.github/workflows/dotnet-repository-inventory.yml) workflow builds a consolidated, read-only inventory of .NET projects across repositories accessible to the configured GitHub App.
@@ -190,6 +192,8 @@ The distributor scans public repositories visible to the configured GitHub App a
 When drift exists, the workflow creates or refreshes a single `chore/sync-agent-governance` branch and opens one Pull Request per affected repository, even when several skills changed together. It does not install missing skills, does not modify `AGENTS.md`, does not auto-merge, and does not touch repository-specific files outside the four managed skill paths.
 
 Because this control repository is public, non-public repositories are skipped without exposing their names or metadata in public workflow output. Manual execution defaults to `dry_run: true` so distribution can be inspected without writing to consumer repositories.
+
+Consumer distribution also isolates failures per public repository: read, clone, checkout, commit, push, and PR creation/refresh errors are recorded without suppressing subsequent consumers. The Summary includes an explicit `success`/`current`/`skipped`/`error` status for each evaluated public repository and a final aggregate error count. Read-only API GET calls alone use the bounded transient retry policy above; mutations are never blindly retried. Upstream skill synchronization targets only the central registry (one target), so failures there remain job-level failures rather than consumer-batch errors.
 
 The resulting supply chain is deliberately review-gated:
 

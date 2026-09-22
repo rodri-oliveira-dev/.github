@@ -26,7 +26,7 @@ jobs:
 
     steps:
       - name: Checkout control-plane branch ownership policy
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.2.2
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: main
           persist-credentials: false
@@ -99,6 +99,7 @@ jobs:
               echo "| Repositories with updates | $repositories_with_updates |"
               echo "| Files requiring updates | $files_updated |"
               echo "| Pull requests created | $pull_requests_created |"
+              echo "| Pull requests updated | $pull_requests_updated |"
               echo "| Repositories skipped | $repositories_skipped |"
               echo "| Non-public repositories skipped | $non_public_repositories_skipped |"
               echo "| Automation ownership errors | $ownership_errors |"
@@ -130,6 +131,7 @@ jobs:
           repositories_current=0
           repositories_with_updates=0
           pull_requests_created=0
+          pull_requests_updated=0
           repositories_skipped=0
           non_public_repositories_skipped=0
           ownership_errors=0
@@ -268,7 +270,6 @@ jobs:
             fi
 
             repositories_with_updates=$((repositories_with_updates + 1))
-            files_updated=$((files_updated + 1))
 
             if [[ "$DRY_RUN" == "true" ]]; then
               log_result "$repo" "Dry run — $GLOBAL_JSON_PATH: $current → $latest ($release_type, $support_phase)"
@@ -287,38 +288,79 @@ jobs:
             fi
 
             if [[ "$AUTOMATION_BRANCH_STATE" == "owned" ]]; then
-              log_result "$repo" "Update available ($current → $latest); PR #$AUTOMATION_PR_NUMBER already open and ownership verified"
-              continue
+              branch_parent_sha="$AUTOMATION_BRANCH_SHA"
+              pr_action="updated"
+            else
+              default_sha="$(gh api "repos/$repo/branches/$default_branch" --jq '.commit.sha')"
+
+              if ! gh api \
+                --method POST \
+                "repos/$repo/git/refs" \
+                -f ref="refs/heads/$UPDATE_BRANCH" \
+                -f sha="$default_sha" \
+                >/dev/null; then
+                ownership_errors=$((ownership_errors + 1))
+                echo "::error title=Automation branch creation race::$repo/$UPDATE_BRANCH appeared or changed after ownership verification."
+                log_result "$repo" "Skipped — automation branch changed during creation"
+                continue
+              fi
+
+              branch_parent_sha="$default_sha"
+              pr_action="created"
             fi
 
-            default_sha="$(gh api "repos/$repo/branches/$default_branch" --jq '.commit.sha')"
-
-            if ! gh api \
-              --method POST \
-              "repos/$repo/git/refs" \
-              -f ref="refs/heads/$UPDATE_BRANCH" \
-              -f sha="$default_sha" \
-              >/dev/null; then
-              ownership_errors=$((ownership_errors + 1))
-              echo "::error title=Automation branch creation race::$repo/$UPDATE_BRANCH appeared or changed after ownership verification."
-              log_result "$repo" "Skipped — automation branch changed during creation"
-              continue
-            fi
-
-            branch_file_response="$(gh api "repos/$repo/contents/$GLOBAL_JSON_PATH?ref=$UPDATE_BRANCH")"
-            file_sha="$(jq -r '.sha' <<< "$branch_file_response")"
+            branch_file_response="$(
+              gh api \
+                --method GET \
+                "repos/$repo/contents/$GLOBAL_JSON_PATH" \
+                -f ref="$branch_parent_sha"
+            )"
             branch_content="$(jq -r '.content' <<< "$branch_file_response" | tr -d '\n' | base64 --decode)"
             updated_content="$(jq --arg version "$latest" '.sdk.version = $version' <<< "$branch_content")"
-            encoded_content="$(printf '%s\n' "$updated_content" | base64 --wrap=0)"
 
-            gh api \
-              --method PUT \
-              "repos/$repo/contents/$GLOBAL_JSON_PATH" \
-              -f message="chore: update .NET SDK from $current to $latest" \
-              -f content="$encoded_content" \
-              -f sha="$file_sha" \
-              -f branch="$UPDATE_BRANCH" \
-              >/dev/null
+            blob_sha="$(
+              gh api \
+                --method POST \
+                "repos/$repo/git/blobs" \
+                -f content="$updated_content" \
+                -f encoding="utf-8" \
+                --jq '.sha'
+            )"
+            parent_tree_sha="$(gh api "repos/$repo/git/commits/$branch_parent_sha" --jq '.tree.sha')"
+            updated_tree_sha="$(
+              gh api \
+                --method POST \
+                "repos/$repo/git/trees" \
+                -f base_tree="$parent_tree_sha" \
+                -f "tree[][path]=$GLOBAL_JSON_PATH" \
+                -f "tree[][mode]=100644" \
+                -f "tree[][type]=blob" \
+                -f "tree[][sha]=$blob_sha" \
+                --jq '.sha'
+            )"
+            update_commit_sha="$(
+              gh api \
+                --method POST \
+                "repos/$repo/git/commits" \
+                -f message="chore: update .NET SDK from $current to $latest" \
+                -f tree="$updated_tree_sha" \
+                -f "parents[]=$branch_parent_sha" \
+                --jq '.sha'
+            )"
+
+            if ! gh api \
+              --method PATCH \
+              "repos/$repo/git/refs/heads/$UPDATE_BRANCH" \
+              -f sha="$update_commit_sha" \
+              -F force=false \
+              >/dev/null; then
+              ownership_errors=$((ownership_errors + 1))
+              echo "::error title=Automation branch changed during SDK refresh::$repo/$UPDATE_BRANCH no longer matches the proven parent SHA."
+              log_result "$repo" "Skipped — automation branch changed during SDK refresh"
+              continue
+            fi
+
+            files_updated=$((files_updated + 1))
 
             pr_body="$(mktemp)"
             {
@@ -343,19 +385,29 @@ jobs:
               printf 'Release metadata source: `%s`\n' "$RELEASE_INDEX_URL"
             } > "$pr_body"
 
-            pr_url="$(
-              gh pr create \
+            if [[ "$pr_action" == "updated" ]]; then
+              gh pr edit "$AUTOMATION_PR_NUMBER" \
                 --repo "$repo" \
-                --base "$default_branch" \
-                --head "$UPDATE_BRANCH" \
                 --title "chore: update .NET SDK from $current to $latest" \
-                --body-file "$pr_body"
-            )"
+                --body-file "$pr_body" \
+                >/dev/null
+              pr_url="$(gh pr view "$AUTOMATION_PR_NUMBER" --repo "$repo" --json url --jq '.url')"
+              pull_requests_updated=$((pull_requests_updated + 1))
+              log_result "$repo" "PR updated: $pr_url ($current → $latest)"
+            else
+              pr_url="$(
+                gh pr create \
+                  --repo "$repo" \
+                  --base "$default_branch" \
+                  --head "$UPDATE_BRANCH" \
+                  --title "chore: update .NET SDK from $current to $latest" \
+                  --body-file "$pr_body"
+              )"
+              pull_requests_created=$((pull_requests_created + 1))
+              log_result "$repo" "PR created: $pr_url ($current → $latest)"
+            fi
 
             rm -f "$pr_body"
-
-            pull_requests_created=$((pull_requests_created + 1))
-            log_result "$repo" "PR created: $pr_url ($current → $latest)"
           done < "$repositories_file"
 
           write_summary

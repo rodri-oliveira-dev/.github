@@ -23,6 +23,7 @@ jobs:
   sync:
     name: Discover root global.json and open update PRs
     runs-on: ubuntu-latest
+    timeout-minutes: 90
 
     steps:
       - name: Checkout control-plane branch ownership policy

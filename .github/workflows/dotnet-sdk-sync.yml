@@ -86,7 +86,13 @@ jobs:
           log_result() {
             local repo="$1"
             local result="$2"
-            printf '| `%s` | %s |\n' "$repo" "$result" | tee -a "$GITHUB_STEP_SUMMARY"
+            local status="error"
+            case "$result" in
+              "Current"*|"PR #"*) status="current" ;;
+              "No root"*|"No update"*|"Skipped (archived"*|"Dry run"*) status="skipped" ;;
+              "PR created"*|"PR metadata updated"*|"PR branch refreshed"*) status="success" ;;
+            esac
+            printf '| `%s` | %s | %s |\n' "$repo" "$status" "$result" | tee -a "$GITHUB_STEP_SUMMARY"
           }
 
           write_pr_body() {
@@ -158,8 +164,8 @@ jobs:
               echo
               printf 'Source: `%s`\n' "$RELEASE_INDEX_URL"
               echo
-              echo "| Repository | Result |"
-              echo "| --- | --- |"
+              echo "| Repository | Status | Result |"
+              echo "| --- | --- | --- |"
             } | tee -a "$GITHUB_STEP_SUMMARY"
           }
 

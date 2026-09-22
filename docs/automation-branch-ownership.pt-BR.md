@@ -12,7 +12,7 @@ O nome reservado, isoladamente, nunca é evidência de que uma branch pertence �
 
 ## Contrato de provenance
 
-Antes de fazer force-update de uma branch reservada existente, o workflow precisa comprovar todos os pontos abaixo:
+Antes de qualquer mutação automatizada de uma branch reservada existente, o workflow precisa comprovar todos os pontos abaixo:
 
 - a branch reservada é diferente da branch padrão/base do repositório;
 - existe exatamente um Pull Request aberto originado dessa branch no mesmo repositório;
@@ -23,7 +23,9 @@ Antes de fazer force-update de uma branch reservada existente, o workflow precis
 
 Se a branch e o Pull Request correspondente estiverem ambos ausentes, a branch pode ser criada. Os pushes usam uma expectativa vazia explícita em `--force-with-lease`, de forma que uma branch criada por outro ator depois da verificação faz o push falhar em vez de reutilizar essa branch.
 
-Ao atualizar uma branch comprovadamente controlada pela automação, o SHA remoto capturado é passado explicitamente para `--force-with-lease`. Assim, qualquer push concorrente após a validação de provenance faz o push da automação ser rejeitado.
+Nos workflows de agent skills baseados em Git, uma branch comprovadamente controlada pela automação é atualizada passando o SHA remoto capturado explicitamente para `--force-with-lease`. Assim, qualquer push concorrente após a validação de provenance faz o push da automação ser rejeitado.
+
+A sincronização do SDK usa uma forma diferente de compare-and-swap: cria o commit de atualização com o SHA comprovado da branch como parent e avança o ref reservado por fast-forward não forçado. Se a branch remota mudar depois da validação de provenance, a atualização do ref é rejeitada. Um PR de automação já aberto é atualizado para um SDK mais novo sem apagar nem recriar sua branch; se a branch já propõe o SDK mais recente, ela permanece inalterada.
 
 A sincronização do SDK não apaga mais uma `chore/sync-dotnet-sdk` existente apenas porque o nome é reservado. Uma branch existente sem provenance válida permanece intacta e é reportada como erro de ownership.
 

@@ -20,7 +20,8 @@ A implementação segue estes princípios:
 - **Infisical CLI fixado em uma versão específica** e baixado diretamente do release oficial;
 - **SHA-256 do binário é validado antes da execução**;
 - **saída é redigida** com `--redact`, evitando imprimir o valor detectado do secret;
-- **falha fechada** — tanto findings quanto falha da ferramenta tornam o check inválido;
+- **falha fechada** — findings, falhas da ferramenta/scanner e cobertura incompleta por tamanho tornam o check inválido;
+- **cobertura explícita de blobs grandes** — antes do Infisical, todo blob Git no escopo de revisão selecionado é comparado com o mesmo limite de 20 MiB por target usado pelo scanner; qualquer blob maior produz `coverage-failure` em vez de um `clean` enganoso;
 - **artifacts de curta duração** — o relatório SARIF redigido fica disponível por apenas 3 dias.
 
 O workflow complementa, e não substitui, o Secret Scanning e o Push Protection nativos do GitHub. A proteção nativa também consegue analisar superfícies que um job de CI não cobre, como conteúdo de issues, Pull Requests, Discussions e wikis.
@@ -38,6 +39,21 @@ O workflow escolhe automaticamente o menor escopo seguro para cada evento:
 Isso evita repetir um full scan em cada PR sem perder a capacidade de fazer auditorias completas periódicas ou manuais.
 
 Se o range esperado não estiver disponível localmente, o comportamento degrada para **full-history**, nunca para um scan mais fraco.
+
+## Arquivos versionados grandes e cobertura por tamanho
+
+O Infisical é executado deliberadamente com `--max-target-megabytes 20`. Para impedir que esse limite crie um blind spot, o workflow primeiro enumera os objetos blob Git alcançáveis exatamente no escopo de revisão escolhido para o scan e verifica seus tamanhos.
+
+A política é **fail-closed**:
+
+- quando todos os blobs Git selecionados têm no máximo 20 MiB, o scanner executa normalmente;
+- quando ao menos um blob selecionado ultrapassa 20 MiB, o Infisical não pode retornar `clean`; o resultado final é `coverage-failure` e o check falha;
+- o Step Summary informa limite configurado, quantidade de blobs grandes e tamanho do maior blob sem imprimir conteúdo de secrets;
+- não existe exceção silenciosa para binários ou artifacts.
+
+Binários grandes ou artifacts gerados que sejam realmente necessários não devem ser tratados com regra de ignore do scanner. Para novos assets, prefira Git LFS, de forma que o Git armazene apenas um pointer pequeno em vez do payload grande. Se um payload grande já estiver no histórico e um full-history scan o selecionar, o histórico precisa ser remediado ou reescrito conforme apropriado antes que a cobertura possa ser considerada completa.
+
+A validação determinística cria um repositório Git temporário contendo um blob acima de 20 MiB com um padrão de secret semelhante a PAT gerado em runtime e comprova que a política retorna `coverage-failure`. Um segundo fixture pequeno valida o caminho normal `covered`.
 
 ## Proteção contra alteração da própria política
 

@@ -72,6 +72,9 @@ Branches reservadas de automação usam um contrato explícito de provenance em 
 
 O [manifesto canônico de agent governance](agent-governance/manifest.json) define as nove skills e a política de ownership/distribuição por artefato. Quatro skills mantidas no upstream são sincronizadas e oferecidas a consumidores existentes por Pull Request revisado; as outras cinco e as instruções do perfil permanecem manuais. A [documentação de agent governance](agent-governance/README.md) descreve o schema e a validação local.
 
+
+Mudanças no contrato de governança passam por verificação de versão em todo Pull Request: alterações em skills canônicas, políticas de agentes, instruções do perfil ou conteúdo semântico do manifesto/perfil exigem incremento de `agent-governance/VERSION` e versões coerentes no manifesto e no perfil. Atualizações de documentação independente não exigem bump. Consulte a [política de versionamento](agent-governance/README.md#required-version-bump-in-pull-requests).
+
 ### Sincronização central do .NET SDK
 
 O workflow [`dotnet-sdk-sync.yml`](.github/workflows/dotnet-sdk-sync.yml) fornece manutenção centralizada de SDK para os repositórios acessíveis à GitHub App configurada.

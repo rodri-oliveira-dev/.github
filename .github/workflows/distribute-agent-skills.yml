@@ -62,6 +62,14 @@ jobs:
           readonly SYNC_BRANCH="chore/sync-agent-governance"
           readonly PR_TITLE="chore(agent-governance): update managed agent skills"
           readonly GOVERNANCE_ROOT="$GITHUB_WORKSPACE"
+          readonly OWNERSHIP_MARKER="<!-- automation-branch-owner: distribute-agent-skills/v1 -->"
+          readonly OWNERSHIP_POLICY="$GOVERNANCE_ROOT/.github/scripts/automation-branch-ownership.sh"
+
+          if [[ ! -r "$OWNERSHIP_POLICY" ]]; then
+            echo "::error title=Missing ownership policy::$OWNERSHIP_POLICY is required before consumer branch mutation."
+            exit 1
+          fi
+          source "$OWNERSHIP_POLICY"
 
           mappings=(
             "dotnet-issue-implementation|agent-governance/skills/dotnet/dotnet-issue-implementation/SKILL.md|.agents/skills/dotnet-issue-implementation/SKILL.md"
@@ -315,30 +323,46 @@ jobs:
 
             git -C "$worktree" commit -m "$PR_TITLE" >/dev/null
 
-            existing_pr="$(
-              gh pr list \
-                --repo "$repo" \
-                --state open \
-                --head "$SYNC_BRANCH" \
-                --json number \
-                --jq '.[0].number // empty'
-            )"
+            if ! verify_automation_branch_ownership \
+              "$repo" \
+              "$SYNC_BRANCH" \
+              "$default_branch" \
+              "$OWNERSHIP_MARKER" \
+              "$PR_TITLE"; then
+              echo "::error title=Automation branch ownership rejected::$repo: $AUTOMATION_OWNERSHIP_ERROR"
+              repository_errors=$((repository_errors + 1))
+              log_result "$repo" "Ownership error — reserved branch left untouched"
+              rm -rf "$worktree"
+              continue
+            fi
 
-            remote_branch_sha="$(
-              gh api "repos/$repo/git/ref/heads/$SYNC_BRANCH" --jq '.object.sha' 2>/dev/null || true
-            )"
-
-            if [[ -n "$remote_branch_sha" ]]; then
-              git -C "$worktree" push --quiet \
-                --force-with-lease="refs/heads/$SYNC_BRANCH:$remote_branch_sha" \
-                origin "HEAD:refs/heads/$SYNC_BRANCH"
+            if [[ "$AUTOMATION_BRANCH_STATE" == "owned" ]]; then
+              if ! git -C "$worktree" push --quiet \
+                --force-with-lease="refs/heads/$SYNC_BRANCH:$AUTOMATION_BRANCH_SHA" \
+                origin "HEAD:refs/heads/$SYNC_BRANCH"; then
+                echo "::error title=Automation branch changed during distribution::$repo/$SYNC_BRANCH changed after provenance was verified."
+                repository_errors=$((repository_errors + 1))
+                log_result "$repo" "Ownership race — remote branch changed"
+                rm -rf "$worktree"
+                continue
+              fi
             else
-              git -C "$worktree" push --quiet origin "HEAD:refs/heads/$SYNC_BRANCH"
+              if ! git -C "$worktree" push --quiet \
+                --force-with-lease="refs/heads/$SYNC_BRANCH:" \
+                origin "HEAD:refs/heads/$SYNC_BRANCH"; then
+                echo "::error title=Automation branch creation race::$repo/$SYNC_BRANCH was created after provenance verification."
+                repository_errors=$((repository_errors + 1))
+                log_result "$repo" "Ownership race — reserved branch appeared"
+                rm -rf "$worktree"
+                continue
+              fi
             fi
 
             pr_body="$(mktemp)"
             cleanup_paths+=("$pr_body")
             {
+              echo "$OWNERSHIP_MARKER"
+              echo
               echo "## Automated agent governance update"
               echo
               echo "This Pull Request updates managed agent skills that already exist in this repository."
@@ -363,13 +387,13 @@ jobs:
               echo "- Repository-specific files outside these managed skill paths are not changed."
             } > "$pr_body"
 
-            if [[ -n "$existing_pr" ]]; then
-              gh pr edit "$existing_pr" \
+            if [[ "$AUTOMATION_BRANCH_STATE" == "owned" ]]; then
+              gh pr edit "$AUTOMATION_PR_NUMBER" \
                 --repo "$repo" \
                 --title "$PR_TITLE" \
                 --body-file "$pr_body" \
                 >/dev/null
-              pr_url="$(gh pr view "$existing_pr" --repo "$repo" --json url --jq '.url')"
+              pr_url="$(gh pr view "$AUTOMATION_PR_NUMBER" --repo "$repo" --json url --jq '.url')"
               pull_requests_updated=$((pull_requests_updated + 1))
               log_result "$repo" "PR updated: $pr_url ($changed_list)"
             else

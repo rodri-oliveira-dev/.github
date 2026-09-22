@@ -153,7 +153,7 @@ Its security policy is intentionally conservative:
 
 False positives should be narrowly reviewed before adding fingerprints or exclusions. A real credential must be revoked or rotated first; ignore rules are not an acceptable remediation for an exposed secret.
 
-This repository applies the same policy to itself through [`control-plane-secret-scan.yml`](.github/workflows/control-plane-secret-scan.yml). The caller runs on every Pull Request without path filters, on pushes to `main`, weekly, and on demand. Its check is intended to be a required status check of the `main-hardened` ruleset so findings or scanner/tool failures block merge while clean Pull Requests receive a deterministic successful conclusion.
+This repository applies the same policy to itself through [`control-plane-secret-scan.yml`](.github/workflows/control-plane-secret-scan.yml). The caller pins the reusable scanner to a reviewed immutable commit SHA, runs on every Pull Request without path filters, on pushes to `main`, weekly, and on demand. Its check is intended to be a required status check of the `main-hardened` ruleset so findings or scanner/tool failures block merge while clean Pull Requests receive a deterministic successful conclusion.
 
 Repositories can adopt the policy through a small caller workflow that references this reusable workflow with `workflow_call`. See [`docs/secret-scanning.md`](docs/secret-scanning.md) for adoption examples, supported scenarios, false-positive handling, and incident-response guidance.
 

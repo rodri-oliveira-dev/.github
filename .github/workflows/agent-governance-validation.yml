@@ -14,6 +14,7 @@ on:
       - ".github/scripts/dotnet-sdk-sync-policy.sh"
       - ".github/scripts/batch-retry.sh"
       - ".github/scripts/test-batch-failure-isolation.sh"
+      - ".github/scripts/test-inventory-timeout.sh"
       - ".github/workflows/agent-governance-validation.yml"
       - ".github/workflows/reusable-secret-scan.yml"
       - ".github/workflows/control-plane-secret-scan.yml"
@@ -75,6 +76,7 @@ jobs:
             .github/scripts/dotnet-sdk-sync-policy.sh
             .github/scripts/batch-retry.sh
             .github/scripts/test-batch-failure-isolation.sh
+            .github/scripts/test-inventory-timeout.sh
             .github/workflows/reusable-secret-scan.yml
             .github/workflows/control-plane-secret-scan.yml
           )
@@ -394,6 +396,14 @@ jobs:
           done
 
           bash .github/scripts/test-batch-failure-isolation.sh
+
+      - name: Validate inventory timeout and process-group cancellation
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          bash -n .github/scripts/test-inventory-timeout.sh
+          bash .github/scripts/test-inventory-timeout.sh
 
       - name: Validate automation branch ownership policy
         shell: bash

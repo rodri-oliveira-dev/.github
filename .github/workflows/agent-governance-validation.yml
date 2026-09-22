@@ -17,6 +17,7 @@ on:
       - ".github/workflows/sync-agent-skills.yml"
       - ".github/workflows/distribute-agent-skills.yml"
       - ".github/workflows/dotnet-sdk-sync.yml"
+      - ".github/workflows/dotnet-repository-inventory.yml"
       - "README.md"
       - "README.pt-BR.md"
 
@@ -152,6 +153,45 @@ jobs:
           done < <(sed -n 's/^  - source: //p' "$profile")
 
 
+
+      - name: Validate DotNetRepoInspector immutable pin
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          inventory=".github/workflows/dotnet-repository-inventory.yml"
+
+          inspector_version="$(sed -n 's/^[[:space:]]*INSPECTOR_VERSION: "\([^"]*\)"/\1/p' "$inventory" | head -n 1)"
+          inspector_sha="$(sed -n 's/^[[:space:]]*INSPECTOR_SHA: "\([0-9a-f]*\)"/\1/p' "$inventory" | head -n 1)"
+
+          if [[ ! "$inspector_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Inventory must declare DotNetRepoInspector version as MAJOR.MINOR.PATCH."
+            exit 1
+          fi
+
+          if [[ ! "$inspector_sha" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::Inventory must pin DotNetRepoInspector to a full 40-character commit SHA."
+            exit 1
+          fi
+
+          grep -Fq 'origin "$INSPECTOR_SHA"' "$inventory"
+          grep -Fq 'git -C .inspector checkout --detach --quiet FETCH_HEAD' "$inventory"
+          grep -Fq 'resolved_sha="$(git -C .inspector rev-parse HEAD)"' "$inventory"
+          grep -Fq 'inspector_version: $inspector_version' "$inventory"
+          grep -Fq 'inspector_sha: $inspector_sha' "$inventory"
+          grep -Fq '"inspector_version"' "$inventory"
+          grep -Fq '"inspector_sha"' "$inventory"
+
+          if grep -Eq -- '--branch[[:space:]]+(main|master)([[:space:]]|\\|$)' "$inventory"; then
+            echo "::error::DotNetRepoInspector checkout must not use main or master."
+            exit 1
+          fi
+
+          if grep -Eq 'INSPECTOR_(REF|SHA): "(main|master)"' "$inventory"; then
+            echo "::error::DotNetRepoInspector provenance must not use a mutable branch."
+            exit 1
+          fi
+
       - name: Validate secret-scan size coverage policy
         shell: bash
         run: |
@@ -167,9 +207,9 @@ jobs:
           grep -Fq 'bash "$GITHUB_ACTION_PATH/check.sh"' "$size_action"
           grep -Fq 'result=coverage-failure' "$size_policy"
           grep -Fq 'git rev-list --objects "$LOG_OPTS"' "$size_policy"
-          grep -Fq "uses: rodri-oliveira-dev/.github/.github/actions/secret-scan-size-policy@0e4fa80dc15d7e3b1ea381d629211c2e5f994b6b" "$scanner"
+          grep -Fq "uses: rodri-oliveira-dev/.github/.github/actions/secret-scan-size-policy@acb9accc2b52cd039e5dd4cc7dd0105a5b41b1d1" "$scanner"
           grep -Fq -- '--max-target-megabytes 20' "$scanner"
-          grep -Fq "uses: rodri-oliveira-dev/.github/.github/workflows/reusable-secret-scan.yml@39f63eb623b1a15e62a36474b34ef441bc6cbf28" "$caller"
+          grep -Fq "uses: rodri-oliveira-dev/.github/.github/workflows/reusable-secret-scan.yml@acb9accc2b52cd039e5dd4cc7dd0105a5b41b1d1" "$caller"
 
           if grep -Eq 'uses: .*reusable-secret-scan\.yml@(main|master|[^0-9a-f]|$)' "$caller"; then
             echo "::error::Control-plane secret scan must pin the reusable workflow to an immutable commit SHA."

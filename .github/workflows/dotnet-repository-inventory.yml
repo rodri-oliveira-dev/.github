@@ -88,6 +88,9 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    env:
+      INSPECTOR_VERSION: "1.5.2"
+      INSPECTOR_SHA: "6524981f737086c1fdb370697e5d4100330f9bc3"
 
     steps:
       - name: Download sanitized discovery artifact
@@ -124,18 +127,38 @@ jobs:
             )
           ' "$DISCOVERED_REPOSITORIES_FILE" >/dev/null
 
-      - name: Clone DotNetRepoInspector without credentials
+      - name: Checkout pinned DotNetRepoInspector without credentials
         shell: bash
         run: |
           set -Eeuo pipefail
 
-          git clone \
+          if [[ ! "$INSPECTOR_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error title=Invalid Inspector version::INSPECTOR_VERSION must use MAJOR.MINOR.PATCH."
+            exit 1
+          fi
+
+          if [[ ! "$INSPECTOR_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error title=Invalid Inspector SHA::INSPECTOR_SHA must be a full 40-character commit SHA."
+            exit 1
+          fi
+
+          rm -rf .inspector
+          git init --quiet .inspector
+          git -C .inspector remote add origin https://github.com/rodri-oliveira-dev/DotNetRepoInspector.git
+          git -C .inspector fetch \
             --depth 1 \
-            --branch main \
             --filter=blob:none \
             --quiet \
-            https://github.com/rodri-oliveira-dev/DotNetRepoInspector.git \
-            .inspector
+            origin "$INSPECTOR_SHA"
+          git -C .inspector checkout --detach --quiet FETCH_HEAD
+
+          resolved_sha="$(git -C .inspector rev-parse HEAD)"
+          if [[ "$resolved_sha" != "$INSPECTOR_SHA" ]]; then
+            echo "::error title=Inspector checkout mismatch::Expected $INSPECTOR_SHA but resolved $resolved_sha."
+            exit 1
+          fi
+
+          printf 'Using DotNetRepoInspector v%s at %s\n' "$INSPECTOR_VERSION" "$resolved_sha"
 
       - name: Setup .NET SDKs
         uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
@@ -170,8 +193,12 @@ jobs:
           set -Eeuo pipefail
 
           readonly INSPECTOR_REPOSITORY="rodri-oliveira-dev/DotNetRepoInspector"
-          readonly INSPECTOR_REF="main"
           readonly INCLUDE_NON_PUBLIC_REPOSITORIES="false"
+
+          if [[ ! "$INSPECTOR_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ || ! "$INSPECTOR_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error title=Invalid Inspector provenance::Inspector version/SHA metadata is invalid."
+            exit 1
+          fi
 
           mkdir -p "$ARTIFACTS_DIR"
 
@@ -363,7 +390,7 @@ jobs:
             {
               echo "# .NET repository inventory"
               echo
-              printf 'Inspector: `%s@%s`\n' "$INSPECTOR_REPOSITORY" "$INSPECTOR_REF"
+              printf 'Inspector: `%s` version `%s`, commit `%s`\n' "$INSPECTOR_REPOSITORY" "$INSPECTOR_VERSION" "$INSPECTOR_SHA"
               echo
               echo "| Repository | Project | Type | Target Framework | SDK |"
               echo "| --- | --- | --- | --- | --- |"
@@ -454,6 +481,7 @@ jobs:
           inspection_warnings_errors=0
 
           echo ".NET repository inventory"
+          printf 'Inspector: v%s (%s)\n' "$INSPECTOR_VERSION" "$INSPECTOR_SHA"
           echo "Eligible repositories: $repositories_planned"
           echo "Starting repository inspection..."
 
@@ -616,7 +644,9 @@ jobs:
             --arg generated_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             --arg owner "$OWNER" \
             --arg inspector_repository "$INSPECTOR_REPOSITORY" \
-            --arg inspector_ref "$INSPECTOR_REF" \
+            --arg inspector_version "$INSPECTOR_VERSION" \
+            --arg inspector_sha "$INSPECTOR_SHA" \
+            --arg inspector_ref "$INSPECTOR_SHA" \
             --argjson include_non_public_repositories "$INCLUDE_NON_PUBLIC_REPOSITORIES" \
             --argjson repositories_planned "$repositories_planned" \
             --argjson repositories_processed "$repositories_processed" \
@@ -634,6 +664,8 @@ jobs:
                 owner: $owner,
                 source: {
                   inspector_repository: $inspector_repository,
+                  inspector_version: $inspector_version,
+                  inspector_sha: $inspector_sha,
                   inspector_ref: $inspector_ref,
                   include_non_public_repositories: $include_non_public_repositories
                 },
@@ -658,8 +690,12 @@ jobs:
                 problems: ($problems[0] // [])
               }' > "$inventory_json"
 
-          jq -r '
+          jq -r \
+            --arg inspector_version "$INSPECTOR_VERSION" \
+            --arg inspector_sha "$INSPECTOR_SHA" '
             ([
+              "inspector_version",
+              "inspector_sha",
               "repository",
               "visibility",
               "default_branch",
@@ -677,6 +713,8 @@ jobs:
             ] | @csv),
             (.projects[]
               | [
+                  $inspector_version,
+                  $inspector_sha,
                   .repository,
                   .visibility,
                   .default_branch,

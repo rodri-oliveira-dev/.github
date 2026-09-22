@@ -70,6 +70,8 @@ Branches reservadas de automação usam um contrato explícito de provenance em 
 
 ## Automações centrais de .NET
 
+O [manifesto canônico de agent governance](agent-governance/manifest.json) define as nove skills e a política de ownership/distribuição por artefato. Quatro skills mantidas no upstream são sincronizadas e oferecidas a consumidores existentes por Pull Request revisado; as outras cinco e as instruções do perfil permanecem manuais. A [documentação de agent governance](agent-governance/README.md) descreve o schema e a validação local.
+
 ### Sincronização central do .NET SDK
 
 O workflow [`dotnet-sdk-sync.yml`](.github/workflows/dotnet-sdk-sync.yml) fornece manutenção centralizada de SDK para os repositórios acessíveis à GitHub App configurada.

@@ -25,6 +25,13 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Checkout control-plane branch ownership policy
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.2.2
+        with:
+          ref: main
+          persist-credentials: false
+          sparse-checkout: .github/scripts
+
       - name: Create GitHub App token
         id: app-token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
@@ -45,6 +52,14 @@ jobs:
           readonly RELEASE_INDEX_URL="https://dotnetcli.blob.core.windows.net/dotnet/release-metadata/releases-index.json"
           readonly UPDATE_BRANCH="chore/sync-dotnet-sdk"
           readonly GLOBAL_JSON_PATH="global.json"
+          readonly OWNERSHIP_MARKER="<!-- automation-branch-owner: dotnet-sdk-sync/v1 -->"
+          readonly OWNERSHIP_POLICY="$GITHUB_WORKSPACE/.github/scripts/automation-branch-ownership.sh"
+
+          if [[ ! -r "$OWNERSHIP_POLICY" ]]; then
+            echo "::error title=Missing ownership policy::$OWNERSHIP_POLICY is required before cross-repository mutation."
+            exit 1
+          fi
+          source "$OWNERSHIP_POLICY"
 
           release_index="$(mktemp)"
           repositories_file="$(mktemp)"
@@ -86,6 +101,7 @@ jobs:
               echo "| Pull requests created | $pull_requests_created |"
               echo "| Repositories skipped | $repositories_skipped |"
               echo "| Non-public repositories skipped | $non_public_repositories_skipped |"
+              echo "| Automation ownership errors | $ownership_errors |"
             } | tee -a "$GITHUB_STEP_SUMMARY"
           }
 
@@ -116,6 +132,7 @@ jobs:
           pull_requests_created=0
           repositories_skipped=0
           non_public_repositories_skipped=0
+          ownership_errors=0
           files_updated=0
 
           write_header
@@ -258,35 +275,35 @@ jobs:
               continue
             fi
 
-            existing_pr="$(
-              gh pr list \
-                --repo "$repo" \
-                --state open \
-                --head "$UPDATE_BRANCH" \
-                --json number \
-                --jq '.[0].number // empty'
-            )"
+            if ! verify_automation_branch_ownership \
+              "$repo" \
+              "$UPDATE_BRANCH" \
+              "$default_branch" \
+              "$OWNERSHIP_MARKER"; then
+              ownership_errors=$((ownership_errors + 1))
+              echo "::error title=Automation branch ownership rejected::$repo: $AUTOMATION_OWNERSHIP_ERROR"
+              log_result "$repo" "Skipped — reserved branch ownership could not be proven"
+              continue
+            fi
 
-            if [[ -n "$existing_pr" ]]; then
-              log_result "$repo" "Update available ($current → $latest); PR #$existing_pr already open"
+            if [[ "$AUTOMATION_BRANCH_STATE" == "owned" ]]; then
+              log_result "$repo" "Update available ($current → $latest); PR #$AUTOMATION_PR_NUMBER already open and ownership verified"
               continue
             fi
 
             default_sha="$(gh api "repos/$repo/branches/$default_branch" --jq '.commit.sha')"
 
-            if gh api "repos/$repo/git/ref/heads/$UPDATE_BRANCH" >/dev/null 2>&1; then
-              gh api \
-                --method DELETE \
-                "repos/$repo/git/refs/heads/$UPDATE_BRANCH" \
-                >/dev/null
-            fi
-
-            gh api \
+            if ! gh api \
               --method POST \
               "repos/$repo/git/refs" \
               -f ref="refs/heads/$UPDATE_BRANCH" \
               -f sha="$default_sha" \
-              >/dev/null
+              >/dev/null; then
+              ownership_errors=$((ownership_errors + 1))
+              echo "::error title=Automation branch creation race::$repo/$UPDATE_BRANCH appeared or changed after ownership verification."
+              log_result "$repo" "Skipped — automation branch changed during creation"
+              continue
+            fi
 
             branch_file_response="$(gh api "repos/$repo/contents/$GLOBAL_JSON_PATH?ref=$UPDATE_BRANCH")"
             file_sha="$(jq -r '.sha' <<< "$branch_file_response")"
@@ -305,6 +322,8 @@ jobs:
 
             pr_body="$(mktemp)"
             {
+              echo "$OWNERSHIP_MARKER"
+              echo
               echo "## .NET SDK update"
               echo
               echo "This PR was created automatically by the central .NET SDK synchronization workflow."
@@ -340,3 +359,8 @@ jobs:
           done < "$repositories_file"
 
           write_summary
+
+          if [[ "$ownership_errors" -gt 0 ]]; then
+            echo "::error::$ownership_errors repository mutation(s) were blocked because automation branch ownership could not be proven."
+            exit 1
+          fi

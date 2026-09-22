@@ -85,6 +85,7 @@ jobs:
               echo "| Files requiring updates | $files_updated |"
               echo "| Pull requests created | $pull_requests_created |"
               echo "| Repositories skipped | $repositories_skipped |"
+              echo "| Non-public repositories skipped | $non_public_repositories_skipped |"
             } | tee -a "$GITHUB_STEP_SUMMARY"
           }
 
@@ -94,8 +95,18 @@ jobs:
 
           jq -e '.["releases-index"] | type == "array"' "$release_index" >/dev/null
 
+          # Public control plane: serialize repository metadata only after visibility
+          # is evaluated. Non-public repositories become an anonymous sentinel so
+          # names, branches and other metadata never enter the processing stream.
           gh api --paginate "/installation/repositories?per_page=100" \
-            --jq '.repositories[] | [.full_name, .default_branch, (.archived | tostring), (.fork | tostring)] | @tsv' \
+            --jq '
+              .repositories[]
+              | if .visibility == "public" then
+                  ["public", .full_name, .default_branch, (.archived | tostring), (.fork | tostring)] | @tsv
+                else
+                  ["non_public"] | @tsv
+                end
+            ' \
             > "$repositories_file"
 
           repositories_scanned=0
@@ -104,11 +115,226 @@ jobs:
           repositories_with_updates=0
           pull_requests_created=0
           repositories_skipped=0
+          non_public_repositories_skipped=0
           files_updated=0
 
           write_header
 
-          while IFS=$'\t' read -r repo default_branch archived fork; do
+          while IFS=
+              repositories_skipped=$((repositories_skipped + 1))
+              log_result "$repo" "Skipped (archived or fork)"
+              continue
+            fi
+
+            repositories_scanned=$((repositories_scanned + 1))
+
+            file_response_file="$(mktemp)"
+
+            if ! http_status="$(
+              curl --silent --show-error --location \
+                --output "$file_response_file" \
+                --write-out "%{http_code}" \
+                --header "Accept: application/vnd.github+json" \
+                --header "Authorization: Bearer $GH_TOKEN" \
+                --header "X-GitHub-Api-Version: 2022-11-28" \
+                --get \
+                --data-urlencode "ref=$default_branch" \
+                "$GITHUB_API_URL/repos/$repo/contents/$GLOBAL_JSON_PATH"
+            )"; then
+              rm -f "$file_response_file"
+              echo "::error title=GitHub Contents API request failed::Unable to query $repo/$GLOBAL_JSON_PATH."
+              exit 1
+            fi
+
+            case "$http_status" in
+              200)
+                file_response="$(cat "$file_response_file")"
+                rm -f "$file_response_file"
+                ;;
+              404)
+                rm -f "$file_response_file"
+                log_result "$repo" "No root global.json"
+                continue
+                ;;
+              *)
+                api_message="$(jq -r '.message // "Unknown GitHub API error"' "$file_response_file" 2>/dev/null || echo "Unknown GitHub API error")"
+                rm -f "$file_response_file"
+                echo "::error title=GitHub Contents API returned HTTP $http_status::$repo/$GLOBAL_JSON_PATH: $api_message"
+                exit 1
+                ;;
+            esac
+
+            repositories_with_global_json=$((repositories_with_global_json + 1))
+
+            content="$(jq -r '.content' <<< "$file_response" | tr -d '\n' | base64 --decode)"
+
+            if ! jq -e . >/dev/null 2>&1 <<< "$content"; then
+              repositories_current=$((repositories_current + 1))
+              log_result "$repo" "No update (invalid root global.json)"
+              continue
+            fi
+
+            current="$(jq -r '.sdk.version // empty' <<< "$content")"
+
+            if [[ -z "$current" ]]; then
+              repositories_current=$((repositories_current + 1))
+              log_result "$repo" "No update (sdk.version missing)"
+              continue
+            fi
+
+            if [[ "$current" == *-* ]]; then
+              repositories_current=$((repositories_current + 1))
+              log_result "$repo" "No update (preview SDK: $current)"
+              continue
+            fi
+
+            channel="$(awk -F. '{ print $1 "." $2 }' <<< "$current")"
+
+            metadata="$(
+              jq -r --arg channel "$channel" '
+                .["releases-index"][]
+                | select(.["channel-version"] == $channel)
+                | select(
+                    .["support-phase"] == "active"
+                    or .["support-phase"] == "maintenance"
+                  )
+                | [
+                    .["latest-sdk"],
+                    .["release-type"],
+                    .["support-phase"]
+                  ]
+                | @tsv
+              ' "$release_index" | head -n 1
+            )"
+
+            if [[ -z "$metadata" ]]; then
+              repositories_current=$((repositories_current + 1))
+              log_result "$repo" "No update (unsupported channel $channel; current $current)"
+              continue
+            fi
+
+            IFS=$'\t' read -r latest release_type support_phase <<< "$metadata"
+
+            if [[ -z "$latest" || "$latest" == *-* ]]; then
+              repositories_current=$((repositories_current + 1))
+              log_result "$repo" "No update (no stable SDK found for $channel)"
+              continue
+            fi
+
+            if [[ "$current" == "$latest" ]]; then
+              repositories_current=$((repositories_current + 1))
+              log_result "$repo" "Current ($current)"
+              continue
+            fi
+
+            highest="$(printf '%s\n%s\n' "$current" "$latest" | sort -V | tail -n 1)"
+            if [[ "$highest" == "$current" ]]; then
+              repositories_current=$((repositories_current + 1))
+              log_result "$repo" "Current/newer than metadata ($current; metadata $latest)"
+              continue
+            fi
+
+            repositories_with_updates=$((repositories_with_updates + 1))
+            files_updated=$((files_updated + 1))
+
+            if [[ "$DRY_RUN" == "true" ]]; then
+              log_result "$repo" "Dry run — $GLOBAL_JSON_PATH: $current → $latest ($release_type, $support_phase)"
+              continue
+            fi
+
+            existing_pr="$(
+              gh pr list \
+                --repo "$repo" \
+                --state open \
+                --head "$UPDATE_BRANCH" \
+                --json number \
+                --jq '.[0].number // empty'
+            )"
+
+            if [[ -n "$existing_pr" ]]; then
+              log_result "$repo" "Update available ($current → $latest); PR #$existing_pr already open"
+              continue
+            fi
+
+            default_sha="$(gh api "repos/$repo/branches/$default_branch" --jq '.commit.sha')"
+
+            if gh api "repos/$repo/git/ref/heads/$UPDATE_BRANCH" >/dev/null 2>&1; then
+              gh api \
+                --method DELETE \
+                "repos/$repo/git/refs/heads/$UPDATE_BRANCH" \
+                >/dev/null
+            fi
+
+            gh api \
+              --method POST \
+              "repos/$repo/git/refs" \
+              -f ref="refs/heads/$UPDATE_BRANCH" \
+              -f sha="$default_sha" \
+              >/dev/null
+
+            branch_file_response="$(gh api "repos/$repo/contents/$GLOBAL_JSON_PATH?ref=$UPDATE_BRANCH")"
+            file_sha="$(jq -r '.sha' <<< "$branch_file_response")"
+            branch_content="$(jq -r '.content' <<< "$branch_file_response" | tr -d '\n' | base64 --decode)"
+            updated_content="$(jq --arg version "$latest" '.sdk.version = $version' <<< "$branch_content")"
+            encoded_content="$(printf '%s\n' "$updated_content" | base64 --wrap=0)"
+
+            gh api \
+              --method PUT \
+              "repos/$repo/contents/$GLOBAL_JSON_PATH" \
+              -f message="chore: update .NET SDK from $current to $latest" \
+              -f content="$encoded_content" \
+              -f sha="$file_sha" \
+              -f branch="$UPDATE_BRANCH" \
+              >/dev/null
+
+            pr_body="$(mktemp)"
+            {
+              echo "## .NET SDK update"
+              echo
+              echo "This PR was created automatically by the central .NET SDK synchronization workflow."
+              echo
+              echo "| File | Current SDK | Latest supported SDK |"
+              echo "| --- | ---: | ---: |"
+              printf '| `%s` | `%s` | `%s` |\n' "$GLOBAL_JSON_PATH" "$current" "$latest"
+              echo
+              echo "### Policy"
+              echo
+              echo '- Only the repository-root `global.json` is managed.'
+              echo '- Updates remain within the existing .NET `major.minor` channel.'
+              echo "- Preview SDKs are ignored."
+              echo "- Channels outside active/maintenance support are not upgraded automatically."
+              echo "- Major/minor migrations require an explicit repository-level decision."
+              echo
+              printf 'Release metadata source: `%s`\n' "$RELEASE_INDEX_URL"
+            } > "$pr_body"
+
+            pr_url="$(
+              gh pr create \
+                --repo "$repo" \
+                --base "$default_branch" \
+                --head "$UPDATE_BRANCH" \
+                --title "chore: update .NET SDK from $current to $latest" \
+                --body-file "$pr_body"
+            )"
+
+            rm -f "$pr_body"
+
+            pull_requests_created=$((pull_requests_created + 1))
+            log_result "$repo" "PR created: $pr_url ($current → $latest)"
+          done < "$repositories_file"
+
+          write_summary
+\t' read -r visibility_marker repo default_branch archived fork; do
+            if [[ "$visibility_marker" == "non_public" ]]; then
+              non_public_repositories_skipped=$((non_public_repositories_skipped + 1))
+              continue
+            fi
+
+            if [[ "$visibility_marker" != "public" ]]; then
+              echo "::error title=Repository discovery contract violation::Unexpected repository visibility marker."
+              exit 1
+            fi
+
             [[ -z "$repo" ]] && continue
             [[ "$repo" != "$OWNER/"* ]] && continue
 

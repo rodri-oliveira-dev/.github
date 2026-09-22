@@ -39,6 +39,30 @@ jobs:
 
           readonly WORKFLOW=".github/workflows/dotnet-sdk-sync.yml"
 
+          run_block="$(mktemp)"
+          trap 'rm -f "$run_block"' EXIT
+
+          awk '
+            found {
+              if ($0 ~ /^          /) {
+                sub(/^          /, "")
+                print
+                next
+              }
+              exit
+            }
+            /^        run: \|$/ {
+              found = 1
+            }
+          ' "$WORKFLOW" > "$run_block"
+
+          if [[ ! -s "$run_block" ]]; then
+            echo "::error title=Validation setup failed::Unable to extract the SDK synchronization Bash run block."
+            exit 1
+          fi
+
+          bash -n "$run_block"
+
           grep -Fq '.visibility == "public"' "$WORKFLOW"
           grep -Fq '["non_public"] | @tsv' "$WORKFLOW"
           grep -Fq 'if [[ "$visibility_marker" == "non_public" ]]; then' "$WORKFLOW"
@@ -53,7 +77,7 @@ jobs:
           fi
 
           fixture="$(mktemp)"
-          trap 'rm -f "$fixture"' EXIT
+          trap 'rm -f "$run_block" "$fixture"' EXIT
 
           cat > "$fixture" <<'JSON'
           {

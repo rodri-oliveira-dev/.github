@@ -199,7 +199,7 @@ decisão de merge
 
 O [`agent-governance-validation.yml`](.github/workflows/agent-governance-validation.yml) valida o registry e os contratos dos dois workflows de sincronização para manter explícitos a allowlist, os mappings, os limites de revisão e a ausência de auto-merge.
 
-O job `Validate governance source` executa em todo Pull Request e é o merge gate obrigatório de governança para a `main`. Filtros de path em Pull Requests são deliberadamente evitados nesse workflow, garantindo que o required check seja sempre criado mesmo quando a alteração não toca arquivos de agent governance.
+O job `Validate governance source` executa em todo Pull Request. O ruleset ativo `main-hardened` da `main` exige esse check específico do GitHub Actions; o workflow sozinho não impõe a proteção de merge. Filtros de path em Pull Requests são deliberadamente evitados para que o required check seja criado mesmo quando a alteração não toca arquivos de agent governance.
 
 Consulte [`docs/agent-governance.pt-BR.md`](docs/agent-governance.pt-BR.md) para o modelo de composição, regras de versionamento, fluxo de sincronização/distribuição e limites de enforcement.
 

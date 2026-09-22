@@ -331,6 +331,31 @@ jobs:
           grep -Fq 'gh pr edit "$AUTOMATION_PR_NUMBER"' "$sdk"
           grep -Fq -- '--force-with-lease="refs/heads/$UPDATE_BRANCH:$branch_parent_sha"' "$sdk"
           grep -Fq 'pull_requests_updated=$((pull_requests_updated + 1))' "$sdk"
+          grep -Fq -- '--data-urlencode "ref=$default_sha"' "$sdk"
+          grep -Fq 'sdk_update_relation "$exact_source_version" "$latest"' "$sdk"
+          grep -Fq 'reconcile_existing_pr_metadata()' "$sdk"
+          grep -Fq '[[ "$current_title" == "$desired_title" && "$current_body" == "$desired_body" ]]' "$sdk"
+          grep -Fq 'RECONCILED_PR_CHANGED="true"' "$sdk"
+
+          exact_validation_line="$(grep -n -F 'sdk_update_relation "$exact_source_version" "$latest"' "$sdk" | head -n 1 | cut -d: -f1)"
+          branch_creation_line="$(grep -n -F '"repos/$repo/git/refs"' "$sdk" | head -n 1 | cut -d: -f1)"
+          if [[ -z "$exact_validation_line" || -z "$branch_creation_line" || "$exact_validation_line" -ge "$branch_creation_line" ]]; then
+            echo "::error::The exact default-branch SDK source must be validated before creating the reserved automation branch."
+            exit 1
+          fi
+
+          reconcile_calls="$(grep -Fc 'reconcile_existing_pr_metadata "$repo" "$AUTOMATION_PR_NUMBER" "$desired_pr_title" "$pr_body"' "$sdk")"
+          if [[ "$reconcile_calls" -lt 2 ]]; then
+            echo "::error::Existing PR metadata must be reconciled both on the no-op/current path and after a branch refresh."
+            exit 1
+          fi
+
+          metadata_guard_line="$(grep -n -F '[[ "$current_title" == "$desired_title" && "$current_body" == "$desired_body" ]]' "$sdk" | head -n 1 | cut -d: -f1)"
+          metadata_edit_line="$(grep -n -F 'gh pr edit "$pr_number"' "$sdk" | head -n 1 | cut -d: -f1)"
+          if [[ -z "$metadata_guard_line" || -z "$metadata_edit_line" || "$metadata_guard_line" -ge "$metadata_edit_line" ]]; then
+            echo "::error::PR metadata must be compared before gh pr edit is invoked."
+            exit 1
+          fi
 
           if grep -Fq '[[ "$branch_content" == "$updated_content" ]]' "$sdk"; then
             echo "::error::SDK refresh idempotency must compare sdk.version semantically, not raw JSON formatting."

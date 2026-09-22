@@ -164,6 +164,7 @@ jobs:
 
           bash -n "$size_policy"
 
+          grep -Fq 'bash "$GITHUB_ACTION_PATH/check.sh"' "$size_action"
           grep -Fq 'result=coverage-failure' "$size_policy"
           grep -Fq 'git rev-list --objects "$LOG_OPTS"' "$size_policy"
           grep -Fq "uses: rodri-oliveira-dev/.github/.github/actions/secret-scan-size-policy@0e4fa80dc15d7e3b1ea381d629211c2e5f994b6b" "$scanner"
@@ -210,9 +211,6 @@ jobs:
           oversized_count="$(sed -n 's/^oversized-count=//p' "$large_output")"
           [[ "$oversized_count" -ge 1 ]]
           grep -Fq 'Secret scan size coverage' "$large_summary"
-          grep -Fq 'fails closed instead of reporting clean' <(
-            printf '%s\n' "$(grep -F 'Secret scan coverage blocked' /dev/null 2>/dev/null || true)"
-          ) || true
           grep -Fq 'A clean scanner result would not prove complete coverage.' "$large_summary"
 
           small_repo="$fixture_root/small"

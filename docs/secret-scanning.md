@@ -20,7 +20,8 @@ The implementation follows these principles:
 - **the Infisical CLI is pinned to a specific version** and downloaded directly from its official release;
 - **the binary SHA-256 is verified before execution**;
 - **output is redacted** with `--redact`, avoiding disclosure of detected secret values;
-- **fail closed** — both findings and scanner/tool failures invalidate the check;
+- **fail closed** — findings, scanner/tool failures, and incomplete size coverage invalidate the check;
+- **explicit large-blob coverage** — before Infisical runs, every Git blob in the selected revision scope is checked against the same 20 MiB per-target limit used by the scanner; any larger blob produces `coverage-failure` instead of a misleading `clean`;
 - **short-lived artifacts** — the redacted SARIF report is retained for only 3 days.
 
 This workflow complements rather than replaces GitHub Secret Scanning and Push Protection. GitHub's native protection can also scan surfaces a CI job cannot cover, including issue, pull-request, Discussion, and wiki content.
@@ -38,6 +39,21 @@ The workflow automatically chooses the smallest safe scope for each event:
 This avoids performing a full repository scan for every pull request while preserving the ability to run complete periodic or manual audits.
 
 If the expected range is unavailable locally, the workflow falls back to **full-history**, never to a weaker scan.
+
+## Large tracked files and size coverage
+
+Infisical is intentionally invoked with `--max-target-megabytes 20`. To prevent that limit from creating a blind spot, the workflow first enumerates the Git blob objects reachable in the exact revision scope selected for the scan and checks their object sizes.
+
+The policy is **fail-closed**:
+
+- when every selected Git blob is 20 MiB or smaller, the scanner runs normally;
+- when at least one selected Git blob is larger than 20 MiB, Infisical is not allowed to return `clean`; the final result is `coverage-failure` and the check fails;
+- the Step Summary reports the configured limit, oversized-blob count, and largest oversized blob size without printing secret contents;
+- there is no silent binary or artifact exception.
+
+Large binaries or generated artifacts that are intentionally required should not be handled with a scanner ignore rule. For new assets, prefer Git LFS so Git stores a small pointer instead of the large payload. If an oversized payload is already present in history and a full-history scan selects it, the history must be remediated or rewritten as appropriate before the scan can be considered complete.
+
+The deterministic validation creates a temporary Git repository containing a blob larger than 20 MiB with a PAT-like secret pattern generated at runtime and verifies that the size policy returns `coverage-failure`. A separate small-repository fixture verifies the normal `covered` path.
 
 ## Protecting the scanner policy from the pull request itself
 

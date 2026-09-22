@@ -12,7 +12,7 @@ A reserved name alone is never evidence that a branch belongs to automation.
 
 ## Provenance contract
 
-Before an existing reserved branch can be force-updated, the workflow must prove all of the following:
+Before an existing reserved branch can be mutated by automation, the workflow must prove all of the following:
 
 - the reserved branch is different from the repository default/base branch;
 - exactly one open Pull Request exists from that branch in the same repository;
@@ -23,7 +23,9 @@ Before an existing reserved branch can be force-updated, the workflow must prove
 
 If the branch and matching Pull Request are both absent, the branch may be created. Git pushes use an explicit empty `--force-with-lease` expectation so a branch created by another actor after the check causes the push to fail rather than being reused.
 
-If an existing automation-owned branch is refreshed, the captured remote SHA is supplied explicitly to `--force-with-lease`. A concurrent push after the provenance check therefore rejects the automation push.
+For the Git-based agent-skill workflows, an existing automation-owned branch is refreshed with the captured remote SHA supplied explicitly to `--force-with-lease`. A concurrent push after the provenance check therefore rejects the automation push.
+
+The SDK synchronization uses a different compare-and-swap shape: it builds the SDK update commit with the proven branch SHA as its parent and advances the reserved ref with a non-forced fast-forward update. If the remote branch moved after provenance verification, the ref update is rejected. An already-open automation PR is refreshed to a newer SDK without deleting or recreating its branch, while a branch that already proposes the current latest SDK is left unchanged.
 
 The SDK synchronization no longer deletes an existing `chore/sync-dotnet-sdk` merely because its name is reserved. An existing branch without valid provenance is left untouched and reported as an ownership error.
 

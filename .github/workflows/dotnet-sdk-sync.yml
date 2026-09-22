@@ -276,12 +276,13 @@ jobs:
               continue
             fi
 
-            if ! relation="$(sdk_update_relation "$current" "$latest")"; then
+            if ! sdk_update_relation "$current" "$latest"; then
               sdk_policy_errors=$((sdk_policy_errors + 1))
               echo "::error title=Invalid SDK transition::$repo: $SDK_POLICY_ERROR"
               log_result "$repo" "Error — invalid SDK transition ($current → $latest)"
               continue
             fi
+            relation="$SDK_UPDATE_RELATION"
 
             case "$relation" in
               current)
@@ -391,7 +392,7 @@ jobs:
             fi
 
             branch_version="$(jq -r '.sdk.version // empty' <<< "$branch_content")"
-            if ! branch_relation="$(sdk_update_relation "$branch_version" "$latest")"; then
+            if ! sdk_update_relation "$branch_version" "$latest"; then
               sdk_policy_errors=$((sdk_policy_errors + 1))
               echo "::error title=Invalid automation branch SDK::$repo/$UPDATE_BRANCH: $SDK_POLICY_ERROR"
               log_result "$repo" "Error — automation branch SDK is incompatible with target"
@@ -399,6 +400,7 @@ jobs:
               sdk_worktree=""
               continue
             fi
+            branch_relation="$SDK_UPDATE_RELATION"
 
             case "$branch_relation" in
               current)

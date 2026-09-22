@@ -97,7 +97,40 @@ jobs:
           fi
 
           declare -A names=()
-          for file in "${skills[@]}"; do
+          while IFS=
+            if [[ "$(head -n 1 "$file")" != "---" ]]; then
+              echo "::error::$file must start with YAML frontmatter."
+              exit 1
+            fi
+
+            name="$(sed -n 's/^name: //p' "$file" | head -n 1)"
+            description="$(sed -n 's/^description: //p' "$file" | head -n 1)"
+            license="$(sed -n 's/^license: //p' "$file" | head -n 1)"
+
+            if [[ ! "$name" =~ ^[a-z0-9][a-z0-9-]*$ ]]; then
+              echo "::error::$file has invalid or missing skill name."
+              exit 1
+            fi
+            if [[ "$name" != "$expected_name" ]]; then
+              echo "::error::$file declares '$name' but manifest expects '$expected_name'."
+              exit 1
+            fi
+            if [[ -z "$description" ]]; then
+              echo "::error::$file is missing description."
+              exit 1
+            fi
+            if [[ "$license" != "MIT" ]]; then
+              echo "::error::$file must declare license: MIT."
+              exit 1
+            fi
+            if [[ -n "${names[$name]:-}" ]]; then
+              echo "::error::Duplicate skill name: $name."
+              exit 1
+            fi
+            names[$name]="$file"
+          done < <(jq -r '.skills[] | [.source, .name] | @tsv' agent-governance/manifest.json)
+
+\t' read -r file expected_name; do
             if [[ "$(head -n 1 "$file")" != "---" ]]; then
               echo "::error::$file must start with YAML frontmatter."
               exit 1

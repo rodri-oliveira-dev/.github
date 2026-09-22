@@ -97,6 +97,8 @@ A branch reservada `chore/sync-dotnet-sdk` nunca é apagada apenas porque seu no
 
 A cada execução, o workflow recalcula o patch estável elegível mais recente. Se o Pull Request automation-owned estiver defasado, a mesma branch e o mesmo PR são atualizados para o novo target; um segundo PR não é criado. Se a branch já contiver o `sdk.version` alvo, nenhuma alteração é feita, mesmo que a formatação do JSON seja diferente. As versões atual e alvo precisam seguir o formato numérico estável `major.minor.patch` e permanecer no mesmo canal `major.minor` antes de qualquer mutação; metadados inválidos ou estado incompatível da branch falham de forma segura.
 
+**Isolamento de falhas do lote:** erros de API, checkout, commit, push ou PR de um repositório público são registrados como `error` no Summary, e os demais repositórios continuam. Ao terminar, o job apresenta os erros agregados de operação, ownership e política de SDK e então falha se houver erros. Somente chamadas HTTP GET de leitura recebem retry para falha transitória de rede ou HTTP 429/500/502/503/504: no máximo três tentativas e backoff de 1s/2s. Erros HTTP 4xx (exceto 429), falhas de ownership e mutações Git/PR não são repetidos. Se o push ocorrer, mas a criação do PR falhar, a branch reservada é preservada e sinalizada para recuperação manual, sem exclusão ou reutilização não comprovada.
+
 ### Inventário central de repositórios .NET
 
 O workflow [`dotnet-repository-inventory.yml`](.github/workflows/dotnet-repository-inventory.yml) gera um inventário consolidado, somente leitura, dos projetos .NET existentes nos repositórios acessíveis à GitHub App configurada.

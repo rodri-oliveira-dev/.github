@@ -290,7 +290,8 @@ jobs:
           grep -Fq 'SOURCE_REPO: rodri-oliveira-dev/dotnet-library-template' "$sync"
           grep -Fq 'readonly SYNC_BRANCH="chore/sync-upstream-agent-skills"' "$sync"
           grep -Fq 'gh pr create' "$sync"
-          grep -Fq 'git push --force-with-lease' "$sync"
+          grep -Fq -- '--force-with-lease="refs/heads/$SYNC_BRANCH:$AUTOMATION_BRANCH_SHA"' "$sync"
+          grep -Fq -- '--force-with-lease="refs/heads/$SYNC_BRANCH:"' "$sync"
 
           managed=(
             dotnet-issue-implementation

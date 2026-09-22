@@ -44,6 +44,10 @@ jobs:
 
           awk '
             found {
+              if ($0 ~ /^[[:space:]]*$/) {
+                print
+                next
+              }
               if ($0 ~ /^          /) {
                 sub(/^          /, "")
                 print

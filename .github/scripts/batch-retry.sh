@@ -12,11 +12,20 @@ batch_retry_http_get() {
     if [[ "$arg" == "--get" ]]; then
       has_get=true
     fi
-    if [[ "$arg" == "--request" || "$arg" == "--data" || "$arg" == "--data-raw" ||
-          "$arg" == "--data-binary" || "$arg" == "--form" ]]; then
-      echo "::error title=Unsafe HTTP retry::Only explicit GET requests may be retried." >&2
-      return 2
-    fi
+    # --get does not override an explicit -X/--request method. Also reject
+    # upload, implicit POST and config/next options that could change the verb.
+    case "$arg" in
+      --request|--request=*|-X|-X?*|\
+      --data|--data=*|--data-raw|--data-raw=*|\
+      --data-binary|--data-binary=*|--data-ascii|--data-ascii=*|\
+      --form|--form=*|--form-string|--form-string=*|-F|-F?*|\
+      --upload-file|--upload-file=*|-T|-T?*|\
+      --json|--json=*|--config|--config=*|-K|-K?*|\
+      --next|--head|-I)
+        echo "::error title=Unsafe HTTP retry::Only explicit GET requests may be retried." >&2
+        return 2
+        ;;
+    esac
   done
   if [[ "$has_get" != "true" ]]; then
     echo "::error title=Unsafe HTTP retry::Missing --get for read-only request." >&2

@@ -111,20 +111,119 @@ if kill -0 "$child_pid" 2>/dev/null; then
   fi
 fi
 
-# The timeout belongs to only one repository; a second repository completes.
-results=()
-timeouts=0
-for repository in hung-repository healthy-repository; do
-  if [[ "$repository" == "hung-repository" ]]; then
-    results+=("$repository:inspection_timeout")
-    timeouts=$((timeouts + 1))
-    continue
-  fi
-  run_bounded_command 2 "$fixture_root/healthy.out" "$fixture_root/healthy.err" "$fixture_root/timeout.err" bash -c 'exit 0'
-  [[ "$BOUNDED_COMMAND_TIMED_OUT" == "false" ]]
-  results+=("$repository:inspected")
-done
-[[ "$timeouts" -eq 1 ]]
-[[ "${results[*]}" == "hung-repository:inspection_timeout healthy-repository:inspected" ]]
 
-echo "Inventory timeout policy, process-group termination and batch continuation passed."
+# Execute the full production inspection block, not a fixture-specific loop.
+# Mock only external git/dotnet commands: discovery, clone, timeout handling,
+# JSON/CSV emission and Summary remain the exact workflow implementation.
+mock_bin="$fixture_root/mock-bin"
+mkdir -p "$mock_bin" "$fixture_root/artifacts"
+cat > "$mock_bin/git" <<'GIT_FIXTURE'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+[[ "$1" == "clone" ]] || exit 97
+source_url=""
+destination=""
+for arg in "$@"; do
+  if [[ "$arg" == https://github.com/* ]]; then
+    source_url="$arg"
+  fi
+  destination="$arg"
+done
+[[ -n "$source_url" && -n "$destination" ]] || exit 98
+mkdir -p "$destination"
+printf '%s\n' '<Project Sdk="Microsoft.NET.Sdk"></Project>' > "$destination/Sample.csproj"
+if [[ "$source_url" == */hung-repository.git ]]; then
+  : > "$destination/.hang"
+fi
+GIT_FIXTURE
+
+cat > "$mock_bin/dotnet" <<'DOTNET_FIXTURE'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+[[ "$1" == "run" ]] || exit 97
+repository_path=""
+report_path=""
+while (($#)); do
+  case "$1" in
+    --)
+      repository_path="$2"
+      shift 2
+      ;;
+    --output)
+      report_path="$2"
+      shift 2
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
+[[ -n "$repository_path" && -n "$report_path" ]] || exit 98
+if [[ -f "$repository_path/.hang" ]]; then
+  exec sleep 30
+fi
+cat > "$report_path" <<'JSON_FIXTURE'
+{
+  "dotNetSdk": {"configured": {"version": "10.0.100"}, "resolvedVersion": "10.0.100"},
+  "diagnostics": [],
+  "projects": [{
+    "path": "Sample.csproj",
+    "name": "Sample",
+    "classification": {"kind": "library"},
+    "targetFrameworks": ["net10.0"],
+    "sdks": [],
+    "diagnostics": [],
+    "isTestProject": false,
+    "isPackable": true,
+    "outputType": "Library"
+  }]
+}
+JSON_FIXTURE
+DOTNET_FIXTURE
+chmod +x "$mock_bin/git" "$mock_bin/dotnet"
+
+cat > "$fixture_root/repositories.json" <<'JSON_REPOSITORIES'
+[
+  {"repository": "rodri-oliveira-dev/hung-repository", "default_branch": "main"},
+  {"repository": "rodri-oliveira-dev/healthy-repository", "default_branch": "main"}
+]
+JSON_REPOSITORIES
+
+# Shorten only the timeout duration and kill grace for local testing.
+sed -e 's/--kill-after=10s/--kill-after=1s/' "$fixture_root/inventory.bash" > "$fixture_root/production-inventory.bash"
+bash -n "$fixture_root/production-inventory.bash"
+PATH="$mock_bin:$PATH" \
+OWNER="rodri-oliveira-dev" \
+INSPECTOR_VERSION="1.5.2" \
+INSPECTOR_SHA="6524981f737086c1fdb370697e5d4100330f9bc3" \
+REPOSITORY_CLONE_TIMEOUT_SECONDS=2 \
+REPOSITORY_INSPECTION_TIMEOUT_SECONDS=1 \
+DISCOVERED_REPOSITORIES_FILE="$fixture_root/repositories.json" \
+ARTIFACTS_DIR="$fixture_root/artifacts" \
+INSPECTOR_PROJECT="$fixture_root/fixture.csproj" \
+GITHUB_STEP_SUMMARY="$fixture_root/step-summary.md" \
+  bash "$fixture_root/production-inventory.bash" > "$fixture_root/production-output.log"
+
+report="$fixture_root/artifacts/dotnet-repository-inventory.json"
+[[ -s "$report" ]]
+jq -e '
+  . as $inventory
+  | ($inventory.summary.repositories_planned == 2)
+    and ($inventory.summary.repositories_processed == 2)
+    and ($inventory.summary.repository_inspection_timeouts == 1)
+    and ($inventory.summary.repository_clone_timeouts == 0)
+    and ($inventory.repositories | length == 2)
+    and ($inventory.repositories | map(.repository) ==
+      ["rodri-oliveira-dev/hung-repository", "rodri-oliveira-dev/healthy-repository"])
+    and ($inventory.repositories | map(.status) == ["inspection_timeout", "inspected"])
+    and ($inventory.problems | map(.stage) == ["inspection_timeout"])
+    and ($inventory.projects | map(.status) == ["inspection_timeout", "ok"])
+' "$report" >/dev/null
+grep -Fq 'TIMEOUT rodri-oliveira-dev/hung-repository' "$fixture_root/production-output.log"
+grep -Fq 'OK' "$fixture_root/production-output.log"
+grep -Fq 'rodri-oliveira-dev/healthy-repository' "$fixture_root/production-output.log"
+grep -Fq '| Repository inspection timeouts | 1 |' "$fixture_root/step-summary.md"
+grep -Fq 'rodri-oliveira-dev/hung-repository' "$fixture_root/step-summary.md"
+test -s "$fixture_root/artifacts/dotnet-repository-inventory.csv"
+
+echo "Inventory timeout policy, production batch continuation, and process-group termination passed."

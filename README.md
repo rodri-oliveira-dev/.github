@@ -97,6 +97,8 @@ The reserved `chore/sync-dotnet-sdk` branch is never deleted merely because its 
 
 Each run recalculates the latest eligible stable patch. If the automation-owned Pull Request is stale, the same branch and PR are refreshed to that target; a second PR is not created. If the branch already contains the target `sdk.version`, it is left untouched even when JSON formatting differs. Both current and target versions must use stable numeric `major.minor.patch` format and remain in the same `major.minor` channel before any branch mutation; invalid metadata or an incompatible branch state fails safely.
 
+**Batch failure isolation:** A public repository's API, checkout, commit, push, or PR error is recorded as `error` in its Summary row; other repositories continue. The job reports aggregated repository/ownership/SDK policy errors and fails after the batch, rather than stopping at the first consumer. Only read-only HTTP GET calls retry for transient network failures or HTTP 429/500/502/503/504, at most three attempts with 1s/2s backoff. HTTP 4xx other than 429, ownership failures, and Git/PR mutations are not retried. If the branch push succeeds but PR creation fails, the reserved branch is preserved and reported for manual recovery, never deleted or blindly reused.
+
 ### .NET repository inventory
 
 The [`dotnet-repository-inventory.yml`](.github/workflows/dotnet-repository-inventory.yml) workflow builds a consolidated, read-only inventory of .NET projects across repositories accessible to the configured GitHub App.

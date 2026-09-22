@@ -337,7 +337,7 @@ jobs:
           grep -Fq '[[ "$current_title" == "$desired_title" && "$current_body" == "$desired_body" ]]' "$sdk"
           grep -Fq 'RECONCILED_PR_CHANGED="true"' "$sdk"
 
-          exact_validation_line="$(grep -n -E '^[[:space:]]*if ! sdk_update_relation "\$exact_source_version" "\$latest"; then[[:space:]]*
+          exact_validation_line="$(grep -n -E '^[[:space:]]*if ! sdk_update_relation "\$exact_source_version" "\$latest"; then[[:space:]]*$' "$sdk" | head -n 1 | cut -d: -f1)"
           branch_creation_line="$(grep -n -F '"repos/$repo/git/refs"' "$sdk" | head -n 1 | cut -d: -f1)"
           if [[ -z "$exact_validation_line" || -z "$branch_creation_line" || "$exact_validation_line" -ge "$branch_creation_line" ]]; then
             echo "::error::The exact default-branch SDK source must be validated before creating the reserved automation branch."

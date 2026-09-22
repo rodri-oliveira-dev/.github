@@ -95,6 +95,8 @@ Because this control plane is public, the SDK synchronization treats repository 
 
 The reserved `chore/sync-dotnet-sdk` branch is never deleted merely because its name matches the automation convention. If it already exists, the workflow requires valid Pull Request provenance before treating it as automation-owned; an orphaned or human-created branch is left untouched and reported as an ownership error.
 
+Each run recalculates the latest eligible stable patch. If the automation-owned Pull Request is stale, the same branch and PR are refreshed to that target; a second PR is not created. If the branch already contains the target `sdk.version`, it is left untouched even when JSON formatting differs. Both current and target versions must use stable numeric `major.minor.patch` format and remain in the same `major.minor` channel before any branch mutation; invalid metadata or an incompatible branch state fails safely.
+
 ### .NET repository inventory
 
 The [`dotnet-repository-inventory.yml`](.github/workflows/dotnet-repository-inventory.yml) workflow builds a consolidated, read-only inventory of .NET projects across repositories accessible to the configured GitHub App.

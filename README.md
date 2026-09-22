@@ -2,6 +2,7 @@
 
 [![Sync .NET SDK versions](https://github.com/rodri-oliveira-dev/.github/actions/workflows/dotnet-sdk-sync.yml/badge.svg)](https://github.com/rodri-oliveira-dev/.github/actions/workflows/dotnet-sdk-sync.yml)
 [![Inventory .NET repositories](https://github.com/rodri-oliveira-dev/.github/actions/workflows/dotnet-repository-inventory.yml/badge.svg)](https://github.com/rodri-oliveira-dev/.github/actions/workflows/dotnet-repository-inventory.yml)
+[![Control plane secret scan](https://github.com/rodri-oliveira-dev/.github/actions/workflows/control-plane-secret-scan.yml/badge.svg)](https://github.com/rodri-oliveira-dev/.github/actions/workflows/control-plane-secret-scan.yml)
 [![Agent governance validation](https://github.com/rodri-oliveira-dev/.github/actions/workflows/agent-governance-validation.yml/badge.svg)](https://github.com/rodri-oliveira-dev/.github/actions/workflows/agent-governance-validation.yml)
 [![Sync upstream agent skills](https://github.com/rodri-oliveira-dev/.github/actions/workflows/sync-agent-skills.yml/badge.svg)](https://github.com/rodri-oliveira-dev/.github/actions/workflows/sync-agent-skills.yml)
 [![Distribute managed agent skills](https://github.com/rodri-oliveira-dev/.github/actions/workflows/distribute-agent-skills.yml/badge.svg)](https://github.com/rodri-oliveira-dev/.github/actions/workflows/distribute-agent-skills.yml)
@@ -29,6 +30,7 @@ Repository-specific files always take precedence when a project needs different 
 | [`.github/workflows/dotnet-sdk-sync.yml`](.github/workflows/dotnet-sdk-sync.yml) | Central automation that checks repository-root `global.json` files and opens SDK update Pull Requests when appropriate. |
 | [`.github/workflows/dotnet-repository-inventory.yml`](.github/workflows/dotnet-repository-inventory.yml) | Central read-only automation that inventories .NET projects across repositories accessible to the configured GitHub App. |
 | [`.github/workflows/reusable-secret-scan.yml`](.github/workflows/reusable-secret-scan.yml) | Reusable, language-agnostic Git-history secret scanning policy for .NET and future stacks such as Node.js, React, Java, Python, Go, Terraform, Kubernetes, and Docker. |
+| [`.github/workflows/control-plane-secret-scan.yml`](.github/workflows/control-plane-secret-scan.yml) | Applies the reusable secret-scanning policy to this control plane on every Pull Request, pushes to `main`, scheduled audits, and manual runs. |
 | [`.github/workflows/agent-governance-validation.yml`](.github/workflows/agent-governance-validation.yml) | Deterministic validation for the central agent-governance registry, profile mappings, managed skills, and synchronization/distribution contracts. |
 | [`.github/workflows/sync-agent-skills.yml`](.github/workflows/sync-agent-skills.yml) | Weekly upstream synchronization of four allowlisted .NET skills from `dotnet-library-template` into the central registry through a reviewed Pull Request. |
 | [`.github/workflows/distribute-agent-skills.yml`](.github/workflows/distribute-agent-skills.yml) | Distributes approved managed skills from `.github/main` to public consumer repositories that already use them, opening one reviewed Pull Request per repository when drift exists. |
@@ -150,6 +152,8 @@ Its security policy is intentionally conservative:
 - prevents a Pull Request from weakening its own `.infisical-scan.toml` or `.infisicalignore` policy by using the base-branch versions during that PR scan.
 
 False positives should be narrowly reviewed before adding fingerprints or exclusions. A real credential must be revoked or rotated first; ignore rules are not an acceptable remediation for an exposed secret.
+
+This repository applies the same policy to itself through [`control-plane-secret-scan.yml`](.github/workflows/control-plane-secret-scan.yml). The caller runs on every Pull Request without path filters, on pushes to `main`, weekly, and on demand. Its check is intended to be a required status check of the `main-hardened` ruleset so findings or scanner/tool failures block merge while clean Pull Requests receive a deterministic successful conclusion.
 
 Repositories can adopt the policy through a small caller workflow that references this reusable workflow with `workflow_call`. See [`docs/secret-scanning.md`](docs/secret-scanning.md) for adoption examples, supported scenarios, false-positive handling, and incident-response guidance.
 

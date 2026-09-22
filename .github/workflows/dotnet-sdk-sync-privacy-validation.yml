@@ -1,0 +1,114 @@
+name: Validate .NET SDK sync privacy
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/dotnet-sdk-sync.yml"
+      - ".github/workflows/dotnet-sdk-sync-privacy-validation.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/dotnet-sdk-sync.yml"
+      - ".github/workflows/dotnet-sdk-sync-privacy-validation.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dotnet-sdk-sync-privacy-validation-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Validate SDK sync privacy
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Validate public-only discovery contract
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          readonly WORKFLOW=".github/workflows/dotnet-sdk-sync.yml"
+
+          grep -Fq '.visibility == "public"' "$WORKFLOW"
+          grep -Fq '["non_public"] | @tsv' "$WORKFLOW"
+          grep -Fq 'if [[ "$visibility_marker" == "non_public" ]]; then' "$WORKFLOW"
+          grep -Fq 'Non-public repositories skipped' "$WORKFLOW"
+
+          guard_line="$(grep -Fn 'if [[ "$visibility_marker" == "non_public" ]]; then' "$WORKFLOW" | head -n 1 | cut -d: -f1)"
+          first_repo_log_line="$(grep -Fn 'log_result "$repo"' "$WORKFLOW" | head -n 1 | cut -d: -f1)"
+
+          if [[ -z "$guard_line" || -z "$first_repo_log_line" || "$guard_line" -ge "$first_repo_log_line" ]]; then
+            echo "::error title=Privacy guard ordering invalid::Non-public repositories must be rejected before repository-specific logging."
+            exit 1
+          fi
+
+          fixture="$(mktemp)"
+          trap 'rm -f "$fixture"' EXIT
+
+          cat > "$fixture" <<'JSON'
+          {
+            "repositories": [
+              {
+                "full_name": "rodri-oliveira-dev/public-sample",
+                "default_branch": "main",
+                "archived": false,
+                "fork": false,
+                "visibility": "public"
+              },
+              {
+                "full_name": "rodri-oliveira-dev/private-sensitive-repository",
+                "default_branch": "secret-branch",
+                "archived": false,
+                "fork": false,
+                "visibility": "private"
+              },
+              {
+                "full_name": "rodri-oliveira-dev/internal-sensitive-repository",
+                "default_branch": "internal-branch",
+                "archived": false,
+                "fork": false,
+                "visibility": "internal"
+              }
+            ]
+          }
+          JSON
+
+          sanitized="$(
+            jq -r '
+              .repositories[]
+              | if .visibility == "public" then
+                  ["public", .full_name, .default_branch, (.archived | tostring), (.fork | tostring)] | @tsv
+                else
+                  ["non_public"] | @tsv
+                end
+            ' "$fixture"
+          )"
+
+          expected_public=$'public\trodri-oliveira-dev/public-sample\tmain\tfalse\tfalse'
+          grep -Fxq "$expected_public" <<< "$sanitized"
+
+          if grep -Fq 'private-sensitive-repository' <<< "$sanitized" \
+            || grep -Fq 'secret-branch' <<< "$sanitized" \
+            || grep -Fq 'internal-sensitive-repository' <<< "$sanitized" \
+            || grep -Fq 'internal-branch' <<< "$sanitized"; then
+            echo "::error title=Private metadata leak::Non-public repository metadata appeared in sanitized discovery output."
+            exit 1
+          fi
+
+          non_public_count="$(grep -Fxc 'non_public' <<< "$sanitized")"
+          if [[ "$non_public_count" -ne 2 ]]; then
+            echo "::error title=Unexpected anonymous count::Expected 2 non-public sentinels, got $non_public_count."
+            exit 1
+          fi
+
+          echo "SDK sync privacy regression validation passed."

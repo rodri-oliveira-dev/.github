@@ -70,6 +70,7 @@ jobs:
             exit 1
           fi
           source "$OWNERSHIP_POLICY"
+          source "$GOVERNANCE_ROOT/.github/scripts/batch-retry.sh"
 
           mappings=(
             "dotnet-issue-implementation|agent-governance/skills/dotnet/dotnet-issue-implementation/SKILL.md|.agents/skills/dotnet-issue-implementation/SKILL.md"
@@ -124,14 +125,20 @@ jobs:
             printf 'Central source: `%s@%s`\n' "$CENTRAL_REPO" "$central_sha"
             printf 'Governance version: `%s`\n' "$governance_version"
             echo
-            echo "| Repository | Result |"
-            echo "| --- | --- |"
+            echo "| Repository | Status | Result |"
+            echo "| --- | --- | --- |"
           } >> "$GITHUB_STEP_SUMMARY"
 
           log_result() {
             local repo="$1"
             local result="$2"
-            printf '| `%s` | %s |\n' "$repo" "$result" >> "$GITHUB_STEP_SUMMARY"
+            local status="error"
+            case "$result" in
+              Current*) status="current" ;;
+              "No managed skills"*|"Drift detected"*|"Skipped"*) status="skipped" ;;
+              "PR created"*|"PR updated"*) status="success" ;;
+            esac
+            printf '| `%s` | %s | %s |\n' "$repo" "$status" "$result" >> "$GITHUB_STEP_SUMMARY"
           }
 
           fetch_consumer_file() {
@@ -141,8 +148,8 @@ jobs:
             local output="$4"
             local status
 
-            status="$(
-              curl --silent --show-error --location \
+            if ! status="$(
+              batch_retry_http_get "$output" curl --silent --show-error --location \
                 --output "$output" \
                 --write-out "%{http_code}" \
                 --header "Accept: application/vnd.github+json" \
@@ -151,7 +158,9 @@ jobs:
                 --get \
                 --data-urlencode "ref=$ref" \
                 "$GITHUB_API_URL/repos/$repo/contents/$path"
-            )"
+            )"; then
+              return 1
+            fi
 
             printf '%s' "$status"
           }
@@ -186,7 +195,12 @@ jobs:
 
               response_file="$(mktemp)"
               cleanup_paths+=("$response_file")
-              http_status="$(fetch_consumer_file "$repo" "$consumer_path" "$default_branch" "$response_file")"
+              if ! http_status="$(fetch_consumer_file "$repo" "$consumer_path" "$default_branch" "$response_file")"; then
+                rm -f -- "$response_file"
+                echo "::error title=Consumer API request failed::$repo/$consumer_path could not be read."
+                repo_failed=true
+                break
+              fi
 
               case "$http_status" in
                 404)
@@ -213,7 +227,12 @@ jobs:
 
               consumer_file="$(mktemp)"
               cleanup_paths+=("$consumer_file")
-              jq -r '.content // empty' "$response_file" | tr -d '\n' | base64 --decode > "$consumer_file"
+              if ! jq -er '.content | select(type == "string")' "$response_file" | tr -d '\n' | base64 --decode > "$consumer_file"; then
+                rm -f -- "$response_file" "$consumer_file"
+                echo "::error title=Invalid consumer payload::$repo/$consumer_path could not be decoded."
+                repo_failed=true
+                break
+              fi
               rm -f "$response_file"
 
               if [[ ! -s "$consumer_file" ]]; then
@@ -270,7 +289,13 @@ jobs:
               continue
             fi
 
-            git -C "$worktree" checkout -B "$SYNC_BRANCH" >/dev/null
+            if ! git -C "$worktree" checkout -B "$SYNC_BRANCH" >/dev/null; then
+              repository_errors=$((repository_errors + 1))
+              echo "::error title=Consumer checkout failed::$repo could not create its local update branch."
+              log_result "$repo" "Error checking out repository"
+              rm -rf -- "$worktree"
+              continue
+            fi
 
             for mapping in "${mappings[@]}"; do
               IFS='|' read -r skill central_path consumer_path <<< "$mapping"
@@ -292,7 +317,11 @@ jobs:
                 break
               fi
 
-              cp "$GOVERNANCE_ROOT/$central_path" "$worktree/$consumer_path"
+              if ! cp "$GOVERNANCE_ROOT/$central_path" "$worktree/$consumer_path"; then
+                echo "::error title=Consumer skill copy failed::$repo/$consumer_path could not be updated."
+                repo_failed=true
+                break
+              fi
             done
 
             if [[ "$repo_failed" == "true" ]]; then
@@ -310,9 +339,15 @@ jobs:
               continue
             fi
 
-            git -C "$worktree" config user.name "agent-governance-sync[bot]"
-            git -C "$worktree" config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git -C "$worktree" add -- "${changed_targets[@]}"
+            if ! git -C "$worktree" config user.name "agent-governance-sync[bot]" ||
+              ! git -C "$worktree" config user.email "41898282+github-actions[bot]@users.noreply.github.com" ||
+              ! git -C "$worktree" add -- "${changed_targets[@]}"; then
+              repository_errors=$((repository_errors + 1))
+              echo "::error title=Consumer staging failed::$repo could not stage its managed skill update."
+              log_result "$repo" "Error staging managed skills"
+              rm -rf -- "$worktree"
+              continue
+            fi
 
             if git -C "$worktree" diff --cached --quiet; then
               repositories_current=$((repositories_current + 1))
@@ -321,7 +356,13 @@ jobs:
               continue
             fi
 
-            git -C "$worktree" commit -m "$PR_TITLE" >/dev/null
+            if ! git -C "$worktree" commit -m "$PR_TITLE" >/dev/null; then
+              repository_errors=$((repository_errors + 1))
+              echo "::error title=Consumer commit failed::$repo could not commit its managed skill update."
+              log_result "$repo" "Error committing managed skills"
+              rm -rf -- "$worktree"
+              continue
+            fi
 
             if ! verify_automation_branch_ownership \
               "$repo" \
@@ -388,23 +429,36 @@ jobs:
             } > "$pr_body"
 
             if [[ "$AUTOMATION_BRANCH_STATE" == "owned" ]]; then
-              gh pr edit "$AUTOMATION_PR_NUMBER" \
+              if ! gh pr edit "$AUTOMATION_PR_NUMBER" \
                 --repo "$repo" \
                 --title "$PR_TITLE" \
                 --body-file "$pr_body" \
-                >/dev/null
-              pr_url="$(gh pr view "$AUTOMATION_PR_NUMBER" --repo "$repo" --json url --jq '.url')"
+                >/dev/null || ! pr_url="$(gh pr view "$AUTOMATION_PR_NUMBER" --repo "$repo" --json url --jq '.url')"; then
+                repository_errors=$((repository_errors + 1))
+                echo "::error title=Consumer PR reconciliation failed::$repo PR #$AUTOMATION_PR_NUMBER could not be updated after push."
+                log_result "$repo" "Error updating PR metadata; branch retained for recovery"
+                rm -f -- "$pr_body"
+                rm -rf -- "$worktree"
+                continue
+              fi
               pull_requests_updated=$((pull_requests_updated + 1))
               log_result "$repo" "PR updated: $pr_url ($changed_list)"
             else
-              pr_url="$(
+              if ! pr_url="$(
                 gh pr create \
                   --repo "$repo" \
                   --base "$default_branch" \
                   --head "$SYNC_BRANCH" \
                   --title "$PR_TITLE" \
                   --body-file "$pr_body"
-              )"
+              )"; then
+                repository_errors=$((repository_errors + 1))
+                echo "::error title=Consumer PR creation failed::$repo branch was pushed but PR creation failed; branch retained for manual recovery."
+                log_result "$repo" "Error creating PR; branch requires manual recovery"
+                rm -f -- "$pr_body"
+                rm -rf -- "$worktree"
+                continue
+              fi
               pull_requests_created=$((pull_requests_created + 1))
               log_result "$repo" "PR created: $pr_url ($changed_list)"
             fi

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Explicit, reviewed promotion of a reusable-workflow contract from main.
-# Must only run with contents:write on workflow_dispatch, never on untrusted PRs.
+# Must only run with contents:write after a trusted main VERSION merge or workflow_dispatch; never on untrusted PRs.
 set -Eeuo pipefail
 
 die() {

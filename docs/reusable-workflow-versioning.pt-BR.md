@@ -40,8 +40,10 @@ A publicação é **dirigida por merge e protegida por review**: alterar
 executa com `contents: write`. Ele nunca executa em `pull_request`. O
 trigger de `push` aceita somente a `main` e somente mudanças no arquivo
 `VERSION`, portanto merges comuns não publicam releases.
-`workflow_dispatch` permanece disponível para retry/recuperação idempotente
-da versão atualmente declarada na `main`.
+`workflow_dispatch` permanece disponível para retry/recuperação. Tanto a
+publicação automática quanto o retry manual resolvem o target para o último
+commit da `main` que alterou `VERSION`, impedindo que um merge posterior e não
+relacionado mude silenciosamente o conteúdo da release.
 
 O workflow resolve a versão a partir do arquivo revisado, valida o formato
 canônico `vMAJOR.MINOR.PATCH`, repositório, branch e SHA completo de 40

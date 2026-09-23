@@ -45,4 +45,5 @@ if GH_TOKEN="" bash "$release" > /dev/null 2>&1; then
   echo "::error::Publishing release unexpectedly succeeded without credentials." >&2
   exit 1
 fi
+bash .github/scripts/test-reusable-workflow-release-order.sh
 echo "Release workflow restrictions, stable-tag contract, and negative fixtures passed."

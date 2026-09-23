@@ -1,0 +1,52 @@
+name: Publish reusable workflow release
+
+# Promotion is privileged and must never run on an untrusted pull_request.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Approved stable version (vMAJOR.MINOR.PATCH)"
+        required: true
+        type: string
+        default: "v1.0.0"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-reusable-workflow-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Publish reviewed control plane release
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout reviewed main revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+          persist-credentials: false
+
+      - name: Validate release request
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          set -Eeuo pipefail
+          bash -n .github/scripts/release-reusable-workflows.sh
+          bash .github/scripts/release-reusable-workflows.sh --validate
+
+      - name: Create immutable release and promote major alias
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          set -Eeuo pipefail
+          bash .github/scripts/release-reusable-workflows.sh

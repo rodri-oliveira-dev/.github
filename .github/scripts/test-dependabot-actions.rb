@@ -48,7 +48,7 @@ def validate_pins(workflow_dir)
   checked = 0
   workflows.each do |path|
     File.foreach(path).with_index(1) do |line, line_number|
-      next unless (match = line.match(/^\s*uses:\s*["']?([^#\s"']+)/))
+      next unless (match = line.match(/^\s*(?:-\s*)?uses:\s*["']?([^#\s"']+)/))
       reference = match[1]
       next if reference.start_with?("./")
       ensure_policy(reference.match?(/\A[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.\/-]+)?@[0-9a-f]{40}\z/),
@@ -75,7 +75,7 @@ def run_self_tests
       validate_pins(workflow_dir)
       raise DependabotPolicyError, "Self-test accepted a mutable Action tag."
     rescue DependabotPolicyError => error
-      raise if error.message == "Self-test accepted a mutable Action tag."
+      raise unless error.message.include?("full 40-character commit SHA")
     end
 
     File.write(config, File.read(config).sub("interval: \"weekly\"", "interval: \"daily\""))

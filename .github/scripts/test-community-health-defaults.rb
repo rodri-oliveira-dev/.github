@@ -78,11 +78,11 @@ assert(config["blank_issues_enabled"] == false,
        ".github/ISSUE_TEMPLATE/config.yml: blank issues must stay disabled so users choose an intent-specific form.")
 
 pr_template = File.read(".github/PULL_REQUEST_TEMPLATE.md")
-%w[
-  "## Summary / Resumo"
-  "## Motivation / Motivação"
-  "## Validation / Validação"
-  "## Compatibility and risk / Compatibilidade e risco"
+[
+  "## Summary / Resumo",
+  "## Motivation / Motivação",
+  "## Validation / Validação",
+  "## Compatibility and risk / Compatibilidade e risco",
   "## Checklist"
 ].each do |heading|
   assert(pr_template.include?(heading), ".github/PULL_REQUEST_TEMPLATE.md: missing section #{heading}.")

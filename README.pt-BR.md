@@ -251,6 +251,7 @@ Consulte [`docs/agent-governance.pt-BR.md`](docs/agent-governance.pt-BR.md) para
 ├── .gitattributes
 ├── .github/
 │   ├── FUNDING.yml
+│   ├── dependabot.yml
 │   └── workflows/
 │       ├── agent-governance-validation.yml
 │       ├── distribute-agent-skills.yml

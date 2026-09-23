@@ -96,9 +96,10 @@ exige PR revisado e aprovação dos testes de governança existentes.
 1. Revise as notas de release e possíveis mudanças de inputs/outputs,
    runtime, secrets ou permissões. Incremente
    `.github/reusable-workflows/VERSION` em PR revisado, faça merge na
-   `main`, confira se a tag da release e o alias da major correspondente
-   (por exemplo, `v2` para `v2.0.0`) apontam para esse commit aprovado e
-   aguarde a conclusão do workflow.
+   `main`, execute manualmente o workflow de release com essa versão exata
+   e então confira se a tag da release e o alias da major correspondente
+   (por exemplo, `v2` para `v2.0.0`) apontam para o commit publicado da
+   `main` e aguarde a conclusão do workflow.
 2. O consumidor em `@v1` acompanha promoções compatíveis
    automaticamente; consumidores em `@v1.0.0` ou SHA devem atualizar
    o caller explicitamente em PR revisado e executar secret scanning

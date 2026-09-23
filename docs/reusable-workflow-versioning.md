@@ -38,8 +38,9 @@ Pull Request. Only after that reviewed change reaches `main` does
 run with `contents: write`. The workflow never runs on `pull_request`.
 Its `push` trigger is restricted to `main` and to the `VERSION` path, so
 ordinary merges do not publish releases. `workflow_dispatch` remains
-available for an idempotent retry/recovery of the version currently declared
-on `main`.
+available for retry/recovery. Both automatic publication and manual retry
+resolve the target to the last `main` commit that changed `VERSION`, so an
+unrelated later merge cannot silently change the release contents.
 
 The workflow resolves the version from the reviewed file, validates canonical
 `vMAJOR.MINOR.PATCH` format, repository, branch and full 40-character commit

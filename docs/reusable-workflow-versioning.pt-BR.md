@@ -28,31 +28,37 @@ workflows reutilizáveis não alteram silenciosamente a versão da governança d
 
 ## Primeira release e promoção controlada
 
-**Primeira release: `v1.0.0`, publicada apenas após o merge deste PR na
-`main` e a aprovação dos checks obrigatórios.** Neste momento,
-`v1.0.0` e `v1` ainda não estão publicadas; os consumidores não devem
-adotar os exemplos antes de confirmar a publicação.
+A versão revisada dos workflows reutilizáveis fica em
+[`.github/reusable-workflows/VERSION`](../.github/reusable-workflows/VERSION).
+O valor inicial é **`v1.0.0`**. Os consumidores devem aguardar a release e o
+alias `v1` ficarem visíveis antes de adotar os exemplos abaixo.
 
-O mantenedor revisa as alterações exatas, notas de migração e
-compatibilidade de cada versão e executa manualmente
+A publicação é **dirigida por merge e protegida por review**: alterar
+`VERSION` exige Pull Request. Somente depois que essa mudança revisada chega
+à `main` o workflow
 [Publish reusable workflow release](../.github/workflows/reusable-workflow-release.yml)
-na **`main`**, informando `vMAJOR.MINOR.PATCH`. O workflow não
-executa em `pull_request` nem em push comum. Ele usa `GITHUB_TOKEN`
-de curta duração com `contents: write` apenas no job manual, valida
-repositório, branch, SHA completo e versão canônica, cria tag imutável e
-GitHub Release e então promove o alias da major correspondente. Ele
-recusa redirecionar tags já publicadas e impede apontar o alias major
-para um commit que não descenda da versão anterior. Reexecutar com a
-mesma versão e commit é idempotente. Se a release for publicada mas a
-promoção do alias falhar, corrija o problema antes de recomendar `@v1`;
-um consumidor ainda pode utilizar uma tag exata/SHA verificados.
+executa com `contents: write`. Ele nunca executa em `pull_request`. O
+trigger de `push` aceita somente a `main` e somente mudanças no arquivo
+`VERSION`, portanto merges comuns não publicam releases.
+`workflow_dispatch` permanece disponível para retry/recuperação idempotente
+da versão atualmente declarada na `main`.
 
-Uma versão compatível nova nasce de outro merge revisado na `main`
-(ex.: `v1.0.1`); nunca mova `v1.0.0`. Mudanças incompatíveis exigem
-nova major (ex.: `v2.0.0`) com instruções de migração, preservando a
-major anterior para consumidores ainda não migrados. O alias major só
-muda no workflow de release explícita, nunca por renomeação de branch
-ou auto-merge de PR de dependências.
+O workflow resolve a versão a partir do arquivo revisado, valida o formato
+canônico `vMAJOR.MINOR.PATCH`, repositório, branch e SHA completo de 40
+caracteres, cria a tag imutável e a GitHub Release e então promove o alias da
+major correspondente. Ele recusa redirecionar tags existentes, rejeita
+regressão SemVer dentro da major e impede apontar o alias major para um commit
+que não descenda da versão anterior. Reexecutar a mesma versão no mesmo commit
+é idempotente. Se a release for publicada mas a promoção do alias falhar,
+corrija o problema antes de recomendar `@v1`; consumidores ainda podem usar
+uma tag exata/SHA verificados.
+
+Para uma versão compatível, incremente `VERSION` em PR revisado (por exemplo,
+`v1.0.1`) e faça merge na `main`; nunca mova `v1.0.0`. Mudanças
+incompatíveis exigem nova major (por exemplo, `v2.0.0`) com instruções de
+migração, preservando a major anterior para consumidores ainda não migrados.
+O alias major só muda por esse workflow privilegiado de release, nunca por
+renomeação de branch ou auto-merge de PR de dependências.
 
 ## Exemplo de consumidor
 
@@ -87,8 +93,10 @@ exige PR revisado e aprovação dos testes de governança existentes.
 ## Atualização, reversão e verificações
 
 1. Revise as notas de release e possíveis mudanças de inputs/outputs,
-   runtime, secrets ou permissões. Confira se a tag da release e `v1`
-   apontam para o commit aprovado e aguarde a aprovação do workflow.
+   runtime, secrets ou permissões. Incremente
+   `.github/reusable-workflows/VERSION` em PR revisado, faça merge na
+   `main`, confira se a tag da release e `v1` apontam para esse commit
+   aprovado e aguarde a conclusão do workflow.
 2. O consumidor em `@v1` acompanha promoções compatíveis
    automaticamente; consumidores em `@v1.0.0` ou SHA devem atualizar
    o caller explicitamente em PR revisado e executar secret scanning

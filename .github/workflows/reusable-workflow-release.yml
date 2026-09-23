@@ -1,14 +1,15 @@
 name: Publish reusable workflow release
 
-# Promotion is privileged and must never run on an untrusted pull_request.
+# Publication is privileged and must never run on an untrusted pull_request.
+# A reviewed VERSION bump publishes only after it reaches main. Manual dispatch
+# is retained for idempotent retry/recovery of the version declared on main.
 on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/reusable-workflows/VERSION"
   workflow_dispatch:
-    inputs:
-      version:
-        description: "Approved stable version (vMAJOR.MINOR.PATCH)"
-        required: true
-        type: string
-        default: "v1.0.0"
 
 permissions:
   contents: read
@@ -33,10 +34,30 @@ jobs:
           fetch-tags: true
           persist-credentials: false
 
+      - name: Resolve reviewed release version
+        id: version
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          version_file=".github/reusable-workflows/VERSION"
+          [[ -s "$version_file" ]] || {
+            echo "::error title=Reusable workflow release::Missing or empty $version_file."
+            exit 1
+          }
+
+          version="$(cat "$version_file")"
+          [[ "$version" =~ ^v([1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || {
+            echo "::error title=Reusable workflow release::$version_file must contain one canonical vMAJOR.MINOR.PATCH value."
+            exit 1
+          }
+
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
       - name: Validate release request
         shell: bash
         env:
-          RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
         run: |
           set -Eeuo pipefail
           bash -n .github/scripts/release-reusable-workflows.sh
@@ -46,7 +67,7 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
         run: |
           set -Eeuo pipefail
           bash .github/scripts/release-reusable-workflows.sh

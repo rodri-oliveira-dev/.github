@@ -47,11 +47,17 @@ relacionado mude silenciosamente o conteúdo da release.
 
 **Pré-requisito obrigatório de proteção da branch:** o ruleset ativo
 `main-hardened` deve exigir pelo menos **uma aprovação de review** para Pull
-Requests e não pode ter **atores com bypass**. A publicação falha de forma
-fechada se essa configuração estiver ausente ou se o PR mergeado que alterou
-`VERSION` não tiver uma aprovação de pessoa diferente da autora no último
-commit do PR. O ajuste deve ser aplicado nas configurações do repositório
-antes do merge deste PR; versionar um arquivo não altera o ruleset ativo.
+Requests e não pode ter **atores com bypass**; o mantenedor deve conferir
+a lista completa de bypass nas configurações do GitHub antes do merge.
+O job de publicação exige que seu `GITHUB_TOKEN` reporte
+`current_user_can_bypass: never`, rejeita qualquer lista não vazia de
+bypass *quando a API a retorna* e exige aprovação de outra pessoa no último
+commit do PR mergeado que alterou `VERSION`. O GitHub pode omitir
+`bypass_actors` para o token do job: campo ausente não comprova que a lista
+esteja vazia. A publicação falha de forma fechada se não puder confirmar
+a ausência de bypass **para o token de release**, a aprovação exigida pelo
+ruleset ou a procedência do PR aprovado. Versionar um arquivo não altera
+o ruleset ativo.
 
 O workflow resolve a versão a partir do arquivo revisado, valida o formato
 canônico `vMAJOR.MINOR.PATCH`, repositório, branch e SHA completo de 40

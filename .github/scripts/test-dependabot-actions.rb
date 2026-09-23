@@ -50,7 +50,7 @@ def validate_pins(workflow_dir)
     File.foreach(path).with_index(1) do |line, line_number|
       next unless (match = line.match(/^\s*(?:-\s*)?uses:\s*["']?([^#\s"']+)/))
       reference = match[1]
-      next if reference.start_with?("./")
+      next if reference.start_with?("./", "$/")
       ensure_policy(reference.match?(/\A[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.\/-]+)?@[0-9a-f]{40}\z/),
                     "#{path}:#{line_number}: remote uses must pin a full 40-character commit SHA (got #{reference}).")
       checked += 1
@@ -66,7 +66,7 @@ def run_self_tests
     FileUtils.mkdir_p(workflow_dir)
     FileUtils.cp(".github/dependabot.yml", config)
     File.write(File.join(workflow_dir, "example.yml"),
-               "steps:\n  - uses: actions/checkout@#{'a' * 40} # v1\n  - uses: ./.github/actions/local\n")
+               "steps:\n  - uses: actions/checkout@#{'a' * 40} # v1\n  - uses: ./.github/actions/local\n  - uses: $/.github/actions/self-repository\n")
     validate_config(config)
     validate_pins(workflow_dir)
 

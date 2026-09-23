@@ -68,6 +68,10 @@ The integration model follows least privilege: GitHub App permissions are scoped
 
 Reserved automation branches use an explicit provenance contract rather than trusting a branch name. Existing branches can be refreshed only when a matching open Pull Request from the same repository carries the expected ownership marker and its head SHA matches the current remote ref; force updates additionally use an explicit SHA-bound `--force-with-lease`. See [automation branch ownership](docs/automation-branch-ownership.md) for the full contract and orphaned-branch recovery procedure.
 
+## Automation implementation and local tests
+
+The maintenance workflows are thin orchestration layers. Their versioned Bash components, preserved trust boundaries, and offline regression suites are documented in [automation components and local validation](docs/automation-components.md).
+
 ## Central .NET automations
 
 The [canonical agent-governance manifest](agent-governance/manifest.json) defines the nine skills and per-artifact ownership/distribution policy. Four upstream-owned skills are synchronized and offered to existing consumers by reviewed Pull Request; the other five and profile instructions remain manual. [Agent governance documentation](agent-governance/README.md) explains the schema and local validation.

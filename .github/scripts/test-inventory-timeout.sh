@@ -4,7 +4,8 @@
 set -Eeuo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-inventory="$root/.github/workflows/dotnet-repository-inventory.yml"
+inventory_workflow="$root/.github/workflows/dotnet-repository-inventory.yml"
+inventory="$root/.github/scripts/automation/dotnet-inventory-inspection.sh"
 sdk="$root/.github/workflows/dotnet-sdk-sync.yml"
 fixture_root="$(mktemp -d)"
 trap 'rm -rf -- "$fixture_root"' EXIT
@@ -13,11 +14,11 @@ trap 'rc=$?; echo "::error::Timeout harness failed on line $LINENO (exit $rc): $
 command -v timeout >/dev/null
 command -v ps >/dev/null
 
-grep -Fq 'timeout-minutes: 15' "$inventory"
-grep -Fq 'timeout-minutes: 120' "$inventory"
+grep -Fq 'timeout-minutes: 15' "$inventory_workflow"
+grep -Fq 'timeout-minutes: 120' "$inventory_workflow"
 grep -Fq 'timeout-minutes: 90' "$sdk"
-grep -Fq 'REPOSITORY_CLONE_TIMEOUT_SECONDS: "120"' "$inventory"
-grep -Fq 'REPOSITORY_INSPECTION_TIMEOUT_SECONDS: "300"' "$inventory"
+grep -Fq 'REPOSITORY_CLONE_TIMEOUT_SECONDS: "120"' "$inventory_workflow"
+grep -Fq 'REPOSITORY_INSPECTION_TIMEOUT_SECONDS: "300"' "$inventory_workflow"
 grep -Fq 'run_bounded_command "$REPOSITORY_CLONE_TIMEOUT_SECONDS"' "$inventory"
 grep -Fq 'run_bounded_command "$REPOSITORY_INSPECTION_TIMEOUT_SECONDS"' "$inventory"
 grep -Fq 'timeout --verbose --signal=TERM --kill-after=10s "${seconds}s"' "$inventory"
@@ -38,16 +39,8 @@ grep -Fq 'append_project_fallback "$repository" "$visibility" "$default_branch" 
 grep -Fq 'repository_clone_timeouts: $repository_clone_timeouts' "$inventory"
 grep -Fq 'repository_inspection_timeouts: $repository_inspection_timeouts' "$inventory"
 
-# Extract the actual, credential-free inspection run block and syntax-check it.
-awk '
-  /^      - name: Generate .NET repository inventory$/ { selected=1; next }
-  selected && /^        run: \|$/ { found=1; next }
-  found {
-    if ($0 ~ /^[[:space:]]*$/) { print; next }
-    if ($0 ~ /^          /) { sub(/^          /, ""); print; next }
-    exit
-  }
-' "$inventory" > "$fixture_root/inventory.bash"
+# Execute the real, credential-free inspection component used by the workflow.
+cp "$inventory" "$fixture_root/inventory.bash"
 [[ -s "$fixture_root/inventory.bash" ]]
 bash -n "$fixture_root/inventory.bash"
 

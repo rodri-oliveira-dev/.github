@@ -1,0 +1,712 @@
+#!/usr/bin/env bash
+# Extracted from .github/workflows/dotnet-sdk-sync.yml; preserve job-scoped environment and trust boundary.
+set -Eeuo pipefail
+
+readonly RELEASE_INDEX_URL="https://dotnetcli.blob.core.windows.net/dotnet/release-metadata/releases-index.json"
+readonly UPDATE_BRANCH="chore/sync-dotnet-sdk"
+readonly GLOBAL_JSON_PATH="global.json"
+readonly OWNERSHIP_MARKER="<!-- automation-branch-owner: dotnet-sdk-sync/v1 -->"
+readonly OWNERSHIP_POLICY="$GITHUB_WORKSPACE/.github/scripts/automation-branch-ownership.sh"
+readonly SDK_POLICY="$GITHUB_WORKSPACE/.github/scripts/dotnet-sdk-sync-policy.sh"
+
+for policy_file in "$OWNERSHIP_POLICY" "$SDK_POLICY"; do
+  if [[ ! -r "$policy_file" ]]; then
+    echo "::error title=Missing control-plane policy::$policy_file is required before cross-repository mutation."
+    exit 1
+  fi
+done
+
+source "$OWNERSHIP_POLICY"
+source "$SDK_POLICY"
+source "$GITHUB_WORKSPACE/.github/scripts/batch-retry.sh"
+
+release_index="$(mktemp)"
+repositories_file="$(mktemp)"
+sdk_worktree=""
+pr_body=""
+
+cleanup() {
+  rm -f "$release_index" "$repositories_file"
+  if [[ -n "$sdk_worktree" ]]; then
+    rm -rf -- "$sdk_worktree"
+  fi
+  if [[ -n "$pr_body" ]]; then
+    rm -f -- "$pr_body"
+  fi
+}
+trap cleanup EXIT
+
+log_result() {
+  local repo="$1"
+  local result="$2"
+  local status="error"
+  case "$result" in
+    "Current"*|"PR #"*) status="current" ;;
+    "No root"*|"No update"*|"Skipped (archived"*|"Dry run"*) status="skipped" ;;
+    "PR created"*|"PR metadata updated"*|"PR branch refreshed"*) status="success" ;;
+  esac
+  printf '| `%s` | %s | %s |\n' "$repo" "$status" "$result" | tee -a "$GITHUB_STEP_SUMMARY"
+}
+
+write_pr_body() {
+  local output_file="$1"
+  local current_version="$2"
+  local target_version="$3"
+  local release_type_value="$4"
+  local support_phase_value="$5"
+
+  {
+    echo "$OWNERSHIP_MARKER"
+    echo
+    echo "## .NET SDK update"
+    echo
+    echo "This PR was created automatically by the central .NET SDK synchronization workflow."
+    echo
+    echo "| File | Current SDK | Latest supported SDK |"
+    echo "| --- | ---: | ---: |"
+    printf '| `%s` | `%s` | `%s` |\n' "$GLOBAL_JSON_PATH" "$current_version" "$target_version"
+    echo
+    echo "### Policy"
+    echo
+    echo '- Only the repository-root `global.json` is managed.'
+    echo '- Updates remain within the existing .NET `major.minor` channel.'
+    echo "- Preview SDKs are ignored."
+    echo "- Channels outside active/maintenance support are not upgraded automatically."
+    echo "- Major/minor migrations require an explicit repository-level decision."
+    echo
+    printf 'Release metadata source: `%s`\n' "$RELEASE_INDEX_URL"
+    printf 'Release type: `%s`; support phase: `%s`\n' "$release_type_value" "$support_phase_value"
+  } > "$output_file"
+}
+
+reconcile_existing_pr_metadata() {
+  local repo_name="$1"
+  local pr_number="$2"
+  local desired_title="$3"
+  local body_file="$4"
+  local metadata current_title current_body desired_body
+
+  if ! metadata="$(gh pr view "$pr_number" --repo "$repo_name" --json title,body,url)"; then
+    return 1
+  fi
+  current_title="$(jq -r '.title' <<< "$metadata")"
+  current_body="$(jq -r '.body // ""' <<< "$metadata")"
+  desired_body="$(cat "$body_file")"
+
+  RECONCILED_PR_URL="$(jq -r '.url' <<< "$metadata")"
+  RECONCILED_PR_CHANGED="false"
+
+  if [[ "$current_title" == "$desired_title" && "$current_body" == "$desired_body" ]]; then
+    return 0
+  fi
+
+  if ! gh pr edit "$pr_number" \
+    --repo "$repo_name" \
+    --title "$desired_title" \
+    --body-file "$body_file" \
+    >/dev/null; then
+    return 1
+  fi
+
+  RECONCILED_PR_CHANGED="true"
+}
+
+write_header() {
+  {
+    echo "# .NET SDK synchronization"
+    echo
+    printf 'Source: `%s`\n' "$RELEASE_INDEX_URL"
+    echo
+    echo "| Repository | Status | Result |"
+    echo "| --- | --- | --- |"
+  } | tee -a "$GITHUB_STEP_SUMMARY"
+}
+
+write_summary() {
+  {
+    echo
+    echo "## Summary"
+    echo
+    echo "| Metric | Count |"
+    echo "| --- | ---: |"
+    echo "| Repositories scanned | $repositories_scanned |"
+    echo "| Repositories with root global.json | $repositories_with_global_json |"
+    echo "| Repositories already current / no automatic update | $repositories_current |"
+    echo "| Repositories with updates | $repositories_with_updates |"
+    echo "| Files updated | $files_updated |"
+    echo "| Pull requests created | $pull_requests_created |"
+    echo "| Pull requests updated | $pull_requests_updated |"
+    echo "| Repositories skipped | $repositories_skipped |"
+    echo "| Non-public repositories skipped | $non_public_repositories_skipped |"
+    echo "| SDK policy errors | $sdk_policy_errors |"
+    echo "| Automation ownership errors | $ownership_errors |"
+    echo "| Repository operation errors | $repository_errors |"
+  } | tee -a "$GITHUB_STEP_SUMMARY"
+}
+
+curl --fail --silent --show-error --location \
+  "$RELEASE_INDEX_URL" \
+  --output "$release_index"
+
+jq -e '.["releases-index"] | type == "array"' "$release_index" >/dev/null
+
+# Public control plane: serialize repository metadata only after visibility
+# is evaluated. Non-public repositories become an anonymous sentinel so
+# names, branches and other metadata never enter the processing stream.
+gh api --paginate "/installation/repositories?per_page=100" \
+  --jq '
+    .repositories[]
+    | if .visibility == "public" then
+        ["public", .full_name, .default_branch, (.archived | tostring), (.fork | tostring)] | @tsv
+      else
+        ["non_public"] | @tsv
+      end
+  ' \
+  > "$repositories_file"
+
+repositories_scanned=0
+repositories_with_global_json=0
+repositories_current=0
+repositories_with_updates=0
+pull_requests_created=0
+pull_requests_updated=0
+repositories_skipped=0
+non_public_repositories_skipped=0
+sdk_policy_errors=0
+ownership_errors=0
+repository_errors=0
+files_updated=0
+
+write_header
+gh auth setup-git
+
+tab="$(printf '\t')"
+
+while IFS="$tab" read -r visibility_marker repo default_branch archived fork; do
+  if [[ "$visibility_marker" == "non_public" ]]; then
+    non_public_repositories_skipped=$((non_public_repositories_skipped + 1))
+    continue
+  fi
+
+  if [[ "$visibility_marker" != "public" ]]; then
+    echo "::error title=Repository discovery contract violation::Unexpected repository visibility marker."
+    exit 1
+  fi
+
+  [[ -z "$repo" ]] && continue
+  [[ "$repo" != "$OWNER/"* ]] && continue
+
+  if [[ "$archived" == "true" || "$fork" == "true" ]]; then
+    repositories_skipped=$((repositories_skipped + 1))
+    log_result "$repo" "Skipped (archived or fork)"
+    continue
+  fi
+
+  repositories_scanned=$((repositories_scanned + 1))
+
+  file_response_file="$(mktemp)"
+
+  if ! http_status="$(
+    batch_retry_http_get "$file_response_file" curl --silent --show-error --location \
+      --output "$file_response_file" \
+      --write-out "%{http_code}" \
+      --header "Accept: application/vnd.github+json" \
+      --header "Authorization: Bearer $GH_TOKEN" \
+      --header "X-GitHub-Api-Version: 2022-11-28" \
+      --get \
+      --data-urlencode "ref=$default_branch" \
+      "$GITHUB_API_URL/repos/$repo/contents/$GLOBAL_JSON_PATH"
+  )"; then
+    rm -f "$file_response_file"
+    echo "::error title=GitHub Contents API request failed::Unable to query $repo/$GLOBAL_JSON_PATH."
+    repository_errors=$((repository_errors + 1))
+    log_result "$repo" "Error — unable to read global.json"
+    continue
+  fi
+
+  case "$http_status" in
+    200)
+      file_response="$(cat "$file_response_file")"
+      rm -f "$file_response_file"
+      ;;
+    404)
+      rm -f "$file_response_file"
+      log_result "$repo" "No root global.json"
+      continue
+      ;;
+    *)
+      api_message="$(jq -r '.message // "Unknown GitHub API error"' "$file_response_file" 2>/dev/null || echo "Unknown GitHub API error")"
+      rm -f "$file_response_file"
+      echo "::error title=GitHub Contents API returned HTTP $http_status::$repo/$GLOBAL_JSON_PATH: $api_message"
+      repository_errors=$((repository_errors + 1))
+      log_result "$repo" "Error — Contents API HTTP $http_status"
+      continue
+      ;;
+  esac
+
+  repositories_with_global_json=$((repositories_with_global_json + 1))
+
+  if ! content="$(jq -er '.content | select(type == "string")' <<< "$file_response" | tr -d '\n' | base64 --decode)"; then
+    repository_errors=$((repository_errors + 1))
+    echo "::error title=Invalid Contents API payload::$repo/$GLOBAL_JSON_PATH could not be decoded."
+    log_result "$repo" "Error — invalid Contents API payload"
+    continue
+  fi
+
+  if ! jq -e . >/dev/null 2>&1 <<< "$content"; then
+    repositories_current=$((repositories_current + 1))
+    log_result "$repo" "No update (invalid root global.json)"
+    continue
+  fi
+
+  current="$(jq -r '.sdk.version // empty' <<< "$content")"
+
+  if [[ -z "$current" ]]; then
+    repositories_current=$((repositories_current + 1))
+    log_result "$repo" "No update (sdk.version missing)"
+    continue
+  fi
+
+  if [[ "$current" == *-* ]]; then
+    repositories_current=$((repositories_current + 1))
+    log_result "$repo" "No update (preview SDK: $current)"
+    continue
+  fi
+
+  if ! validate_stable_sdk_version "$current" "Current SDK"; then
+    sdk_policy_errors=$((sdk_policy_errors + 1))
+    echo "::error title=Invalid current SDK::$repo/$GLOBAL_JSON_PATH: $SDK_POLICY_ERROR"
+    log_result "$repo" "Error — invalid current SDK version"
+    continue
+  fi
+
+  channel="$(sdk_channel "$current")"
+
+  if ! metadata="$(
+    jq -r --arg channel "$channel" '
+      .["releases-index"][]
+      | select(.["channel-version"] == $channel)
+      | select(
+          .["support-phase"] == "active"
+          or .["support-phase"] == "maintenance"
+        )
+      | [
+          .["latest-sdk"],
+          .["release-type"],
+          .["support-phase"]
+        ]
+      | @tsv
+    ' "$release_index" | head -n 1
+  )"; then
+    repository_errors=$((repository_errors + 1))
+    echo "::error title=Release metadata parsing failed::$repo could not read its SDK channel."
+    log_result "$repo" "Error — release metadata parsing failed"
+    continue
+  fi
+
+  if [[ -z "$metadata" ]]; then
+    repositories_current=$((repositories_current + 1))
+    log_result "$repo" "No update (unsupported channel $channel; current $current)"
+    continue
+  fi
+
+  IFS="$tab" read -r latest release_type support_phase <<< "$metadata"
+
+  if [[ -z "$latest" || "$latest" == *-* ]]; then
+    sdk_policy_errors=$((sdk_policy_errors + 1))
+    echo "::error title=Invalid latest SDK::$repo: release metadata did not provide a stable SDK for $channel."
+    log_result "$repo" "Error — release metadata returned no stable SDK for $channel"
+    continue
+  fi
+
+  if ! sdk_update_relation "$current" "$latest"; then
+    sdk_policy_errors=$((sdk_policy_errors + 1))
+    echo "::error title=Invalid SDK transition::$repo: $SDK_POLICY_ERROR"
+    log_result "$repo" "Error — invalid SDK transition ($current → $latest)"
+    continue
+  fi
+  relation="$SDK_UPDATE_RELATION"
+
+  case "$relation" in
+    current)
+      repositories_current=$((repositories_current + 1))
+      log_result "$repo" "Current ($current)"
+      continue
+      ;;
+    newer)
+      repositories_current=$((repositories_current + 1))
+      log_result "$repo" "Current/newer than metadata ($current; metadata $latest)"
+      continue
+      ;;
+    update)
+      ;;
+    *)
+      sdk_policy_errors=$((sdk_policy_errors + 1))
+      echo "::error title=Unexpected SDK relation::$repo: '$relation'."
+      log_result "$repo" "Error — unexpected SDK relation"
+      continue
+      ;;
+  esac
+
+  repositories_with_updates=$((repositories_with_updates + 1))
+
+  if [[ "$DRY_RUN" == "true" ]]; then
+    log_result "$repo" "Dry run — $GLOBAL_JSON_PATH: $current → $latest ($release_type, $support_phase)"
+    continue
+  fi
+
+  if ! verify_automation_branch_ownership \
+    "$repo" \
+    "$UPDATE_BRANCH" \
+    "$default_branch" \
+    "$OWNERSHIP_MARKER"; then
+    ownership_errors=$((ownership_errors + 1))
+    echo "::error title=Automation branch ownership rejected::$repo: $AUTOMATION_OWNERSHIP_ERROR"
+    log_result "$repo" "Skipped — reserved branch ownership could not be proven"
+    continue
+  fi
+
+  if [[ "$AUTOMATION_BRANCH_STATE" == "owned" ]]; then
+    branch_parent_sha="$AUTOMATION_BRANCH_SHA"
+    pr_action="updated"
+  else
+    if ! default_sha="$(gh api "repos/$repo/branches/$default_branch" --jq '.commit.sha')" || [[ ! "$default_sha" =~ ^[0-9a-f]{40}$ ]]; then
+    repository_errors=$((repository_errors + 1))
+    echo "::error title=Default branch lookup failed::$repo branch SHA is unavailable or invalid."
+    log_result "$repo" "Error — default branch lookup failed"
+    continue
+  fi
+    exact_source_response_file="$(mktemp)"
+
+    if ! exact_source_status="$(
+      batch_retry_http_get "$exact_source_response_file" curl --silent --show-error --location \
+        --output "$exact_source_response_file" \
+        --write-out "%{http_code}" \
+        --header "Accept: application/vnd.github+json" \
+        --header "Authorization: Bearer $GH_TOKEN" \
+        --header "X-GitHub-Api-Version: 2022-11-28" \
+        --get \
+        --data-urlencode "ref=$default_sha" \
+        "$GITHUB_API_URL/repos/$repo/contents/$GLOBAL_JSON_PATH"
+    )"; then
+      rm -f "$exact_source_response_file"
+      repository_errors=$((repository_errors + 1))
+      echo "::error title=Exact SDK source read failed::Unable to validate $repo/$GLOBAL_JSON_PATH at $default_sha before branch creation."
+      log_result "$repo" "Error — exact default-branch SDK source could not be validated"
+      continue
+    fi
+
+    if [[ "$exact_source_status" != "200" ]]; then
+      exact_source_message="$(jq -r '.message // "Unknown GitHub API error"' "$exact_source_response_file" 2>/dev/null || echo "Unknown GitHub API error")"
+      rm -f "$exact_source_response_file"
+      repository_errors=$((repository_errors + 1))
+      echo "::error title=Exact SDK source changed::$repo/$GLOBAL_JSON_PATH at $default_sha returned HTTP $exact_source_status: $exact_source_message"
+      log_result "$repo" "Error — exact default-branch SDK source is unavailable"
+      continue
+    fi
+
+    exact_source_response="$(cat "$exact_source_response_file")"
+    rm -f "$exact_source_response_file"
+    if ! exact_source_content="$(jq -er '.content | select(type == "string")' <<< "$exact_source_response" | tr -d '\n' | base64 --decode)"; then
+      repository_errors=$((repository_errors + 1))
+      echo "::error title=Invalid exact Contents API payload::$repo/$GLOBAL_JSON_PATH at $default_sha could not be decoded."
+      log_result "$repo" "Error — exact source payload invalid"
+      continue
+    fi
+
+    if ! jq -e . >/dev/null 2>&1 <<< "$exact_source_content"; then
+      sdk_policy_errors=$((sdk_policy_errors + 1))
+      echo "::error title=Invalid exact SDK source::$repo/$GLOBAL_JSON_PATH at $default_sha is not valid JSON."
+      log_result "$repo" "Error — exact default-branch global.json is invalid"
+      continue
+    fi
+
+    exact_source_version="$(jq -r '.sdk.version // empty' <<< "$exact_source_content")"
+    if ! sdk_update_relation "$exact_source_version" "$latest"; then
+      sdk_policy_errors=$((sdk_policy_errors + 1))
+      echo "::error title=Invalid exact SDK source::$repo/$GLOBAL_JSON_PATH at $default_sha: $SDK_POLICY_ERROR"
+      log_result "$repo" "Error — exact default-branch SDK is incompatible with target"
+      continue
+    fi
+    exact_source_relation="$SDK_UPDATE_RELATION"
+
+    case "$exact_source_relation" in
+      current)
+        repositories_with_updates=$((repositories_with_updates - 1))
+        repositories_current=$((repositories_current + 1))
+        log_result "$repo" "Current after exact source validation ($exact_source_version)"
+        continue
+        ;;
+      newer)
+        repositories_with_updates=$((repositories_with_updates - 1))
+        repositories_current=$((repositories_current + 1))
+        log_result "$repo" "Current/newer after exact source validation ($exact_source_version; metadata $latest)"
+        continue
+        ;;
+      update)
+        current="$exact_source_version"
+        ;;
+      *)
+        sdk_policy_errors=$((sdk_policy_errors + 1))
+        echo "::error title=Unexpected exact SDK relation::$repo: '$exact_source_relation'."
+        log_result "$repo" "Error — unexpected exact SDK source relation"
+        continue
+        ;;
+    esac
+
+    if ! gh api \
+      --method POST \
+      "repos/$repo/git/refs" \
+      -f ref="refs/heads/$UPDATE_BRANCH" \
+      -f sha="$default_sha" \
+      >/dev/null; then
+      ownership_errors=$((ownership_errors + 1))
+      echo "::error title=Automation branch creation race::$repo/$UPDATE_BRANCH appeared or changed after ownership verification."
+      log_result "$repo" "Skipped — automation branch changed during creation"
+      continue
+    fi
+
+    branch_parent_sha="$default_sha"
+    pr_action="created"
+  fi
+
+  sdk_worktree="$(mktemp -d)"
+  if ! git -C "$sdk_worktree" init --quiet || ! git -C "$sdk_worktree" remote add origin "https://github.com/$repo.git"; then
+    repository_errors=$((repository_errors + 1))
+    echo "::error title=SDK worktree initialization failed::$repo could not initialize the temporary repository."
+    log_result "$repo" "Error — git initialization failed"
+    rm -rf -- "$sdk_worktree"
+    sdk_worktree=""
+    continue
+  fi
+
+  if ! git -C "$sdk_worktree" fetch --quiet --depth=1 \
+    origin "refs/heads/$UPDATE_BRANCH:refs/remotes/origin/$UPDATE_BRANCH"; then
+    repository_errors=$((repository_errors + 1))
+    echo "::error title=Automation branch fetch failed::Unable to fetch $repo/$UPDATE_BRANCH after ownership verification."
+    log_result "$repo" "Skipped — unable to fetch proven automation branch"
+    rm -rf -- "$sdk_worktree"
+    sdk_worktree=""
+    continue
+  fi
+
+  if ! fetched_branch_sha="$(git -C "$sdk_worktree" rev-parse "refs/remotes/origin/$UPDATE_BRANCH")"; then
+    repository_errors=$((repository_errors + 1))
+    echo "::error title=SDK branch resolution failed::$repo/$UPDATE_BRANCH could not be resolved."
+    log_result "$repo" "Error — branch resolution failed"
+    rm -rf -- "$sdk_worktree"
+    sdk_worktree=""
+    continue
+  fi
+  if [[ "$fetched_branch_sha" != "$branch_parent_sha" ]]; then
+    ownership_errors=$((ownership_errors + 1))
+    echo "::error title=Automation branch changed before SDK refresh::$repo/$UPDATE_BRANCH moved after ownership verification."
+    log_result "$repo" "Skipped — automation branch changed before SDK refresh"
+    rm -rf -- "$sdk_worktree"
+    sdk_worktree=""
+    continue
+  fi
+
+  if ! git -C "$sdk_worktree" checkout --quiet --detach "$branch_parent_sha"; then
+    repository_errors=$((repository_errors + 1))
+    echo "::error title=SDK checkout failed::$repo/$UPDATE_BRANCH could not be checked out."
+    log_result "$repo" "Error — checkout failed"
+    rm -rf -- "$sdk_worktree"
+    sdk_worktree=""
+    continue
+  fi
+
+  if [[ ! -f "$sdk_worktree/$GLOBAL_JSON_PATH" ]]; then
+    ownership_errors=$((ownership_errors + 1))
+    echo "::error title=Unexpected SDK branch state::$repo/$UPDATE_BRANCH no longer contains $GLOBAL_JSON_PATH."
+    log_result "$repo" "Skipped — automation branch no longer contains root global.json"
+    rm -rf -- "$sdk_worktree"
+    sdk_worktree=""
+    continue
+  fi
+
+  branch_content="$(cat "$sdk_worktree/$GLOBAL_JSON_PATH")"
+
+  if ! jq -e . >/dev/null 2>&1 <<< "$branch_content"; then
+    sdk_policy_errors=$((sdk_policy_errors + 1))
+    echo "::error title=Invalid automation branch global.json::$repo/$UPDATE_BRANCH contains invalid JSON."
+    log_result "$repo" "Error — automation branch global.json is invalid"
+    rm -rf -- "$sdk_worktree"
+    sdk_worktree=""
+    continue
+  fi
+
+  branch_version="$(jq -r '.sdk.version // empty' <<< "$branch_content")"
+  if ! sdk_update_relation "$branch_version" "$latest"; then
+    sdk_policy_errors=$((sdk_policy_errors + 1))
+    echo "::error title=Invalid automation branch SDK::$repo/$UPDATE_BRANCH: $SDK_POLICY_ERROR"
+    log_result "$repo" "Error — automation branch SDK is incompatible with target"
+    rm -rf -- "$sdk_worktree"
+    sdk_worktree=""
+    continue
+  fi
+  branch_relation="$SDK_UPDATE_RELATION"
+  desired_pr_title="chore: update .NET SDK from $current to $latest"
+  pr_body="$(mktemp)"
+  write_pr_body "$pr_body" "$current" "$latest" "$release_type" "$support_phase"
+
+  case "$branch_relation" in
+    current)
+      if [[ "$pr_action" == "updated" ]]; then
+        if ! reconcile_existing_pr_metadata "$repo" "$AUTOMATION_PR_NUMBER" "$desired_pr_title" "$pr_body"; then
+          repository_errors=$((repository_errors + 1))
+          echo "::error title=SDK PR reconciliation failed::$repo PR #$AUTOMATION_PR_NUMBER metadata could not be synchronized."
+          log_result "$repo" "Error — PR metadata reconciliation failed"
+          rm -f -- "$pr_body"
+          pr_body=""
+          rm -rf -- "$sdk_worktree"
+          sdk_worktree=""
+          continue
+        fi
+        if [[ "$RECONCILED_PR_CHANGED" == "true" ]]; then
+          pull_requests_updated=$((pull_requests_updated + 1))
+          log_result "$repo" "PR metadata updated: $RECONCILED_PR_URL ($current → $latest)"
+        else
+          log_result "$repo" "PR #$AUTOMATION_PR_NUMBER already proposes latest SDK $latest with current metadata"
+        fi
+        rm -f -- "$pr_body"
+        pr_body=""
+        rm -rf -- "$sdk_worktree"
+        sdk_worktree=""
+        continue
+      fi
+
+      sdk_policy_errors=$((sdk_policy_errors + 1))
+      echo "::error title=Unexpected SDK branch state::$repo/$UPDATE_BRANCH was newly created but already contains target SDK $latest."
+      log_result "$repo" "Error — newly created automation branch already has target SDK"
+      rm -f -- "$pr_body"
+      pr_body=""
+      rm -rf -- "$sdk_worktree"
+      sdk_worktree=""
+      continue
+      ;;
+    newer)
+      sdk_policy_errors=$((sdk_policy_errors + 1))
+      echo "::error title=Automation branch SDK newer than target::$repo/$UPDATE_BRANCH proposes $branch_version while metadata target is $latest."
+      log_result "$repo" "Error — automation branch SDK is newer than metadata target"
+      rm -f -- "$pr_body"
+      pr_body=""
+      rm -rf -- "$sdk_worktree"
+      sdk_worktree=""
+      continue
+      ;;
+    update)
+      ;;
+    *)
+      sdk_policy_errors=$((sdk_policy_errors + 1))
+      echo "::error title=Unexpected automation branch SDK relation::$repo: '$branch_relation'."
+      log_result "$repo" "Error — unexpected automation branch SDK relation"
+      rm -f -- "$pr_body"
+      pr_body=""
+      rm -rf -- "$sdk_worktree"
+      sdk_worktree=""
+      continue
+      ;;
+  esac
+
+  updated_content="$(jq --arg version "$latest" '.sdk.version = $version' <<< "$branch_content")"
+  printf '%s\n' "$updated_content" > "$sdk_worktree/$GLOBAL_JSON_PATH"
+
+  if ! git -C "$sdk_worktree" diff --check; then
+    sdk_policy_errors=$((sdk_policy_errors + 1))
+    echo "::error title=Invalid SDK update::$repo/$GLOBAL_JSON_PATH contains whitespace errors after update."
+    log_result "$repo" "Skipped — generated SDK update failed validation"
+    rm -f -- "$pr_body"
+    pr_body=""
+    rm -rf -- "$sdk_worktree"
+    sdk_worktree=""
+    continue
+  fi
+
+  if ! git -C "$sdk_worktree" config user.name "dotnet-sdk-sync[bot]" ||
+    ! git -C "$sdk_worktree" config user.email "41898282+github-actions[bot]@users.noreply.github.com" ||
+    ! git -C "$sdk_worktree" add -- "$GLOBAL_JSON_PATH" ||
+    ! git -C "$sdk_worktree" commit --quiet -m "chore: update .NET SDK from $current to $latest"; then
+    repository_errors=$((repository_errors + 1))
+    echo "::error title=SDK commit failed::$repo could not stage or commit its update."
+    log_result "$repo" "Error — git commit failed"
+    rm -f -- "$pr_body"
+    pr_body=""
+    rm -rf -- "$sdk_worktree"
+    sdk_worktree=""
+    continue
+  fi
+
+  if ! git -C "$sdk_worktree" push --quiet \
+    --force-with-lease="refs/heads/$UPDATE_BRANCH:$branch_parent_sha" \
+    origin "HEAD:refs/heads/$UPDATE_BRANCH"; then
+    ownership_errors=$((ownership_errors + 1))
+    echo "::error title=Automation branch changed during SDK refresh::$repo/$UPDATE_BRANCH no longer matches the proven parent SHA."
+    log_result "$repo" "Skipped — automation branch changed during SDK refresh"
+    rm -f -- "$pr_body"
+    pr_body=""
+    rm -rf -- "$sdk_worktree"
+    sdk_worktree=""
+    continue
+  fi
+
+  rm -rf -- "$sdk_worktree"
+  sdk_worktree=""
+  files_updated=$((files_updated + 1))
+
+  if [[ "$pr_action" == "updated" ]]; then
+    if ! reconcile_existing_pr_metadata "$repo" "$AUTOMATION_PR_NUMBER" "$desired_pr_title" "$pr_body"; then
+      repository_errors=$((repository_errors + 1))
+      echo "::error title=SDK PR reconciliation failed::$repo PR #$AUTOMATION_PR_NUMBER metadata could not be synchronized after the branch push."
+      log_result "$repo" "Error — PR metadata reconciliation failed (branch was refreshed)"
+      rm -f -- "$pr_body"
+      pr_body=""
+      continue
+    fi
+    if [[ "$RECONCILED_PR_CHANGED" == "true" ]]; then
+      pull_requests_updated=$((pull_requests_updated + 1))
+      log_result "$repo" "PR metadata updated: $RECONCILED_PR_URL ($current → $latest)"
+    else
+      log_result "$repo" "PR branch refreshed: $RECONCILED_PR_URL ($current → $latest); metadata already current"
+    fi
+  else
+    if ! pr_url="$(
+      gh pr create \
+        --repo "$repo" \
+        --base "$default_branch" \
+        --head "$UPDATE_BRANCH" \
+        --title "$desired_pr_title" \
+        --body-file "$pr_body"
+    )"; then
+      repository_errors=$((repository_errors + 1))
+      echo "::error title=SDK PR creation failed::$repo/$UPDATE_BRANCH was pushed but a PR could not be opened; the reserved branch was left untouched for manual recovery."
+      log_result "$repo" "Error — PR creation failed; branch requires manual recovery"
+      rm -f -- "$pr_body"
+      pr_body=""
+      continue
+    fi
+    pull_requests_created=$((pull_requests_created + 1))
+    log_result "$repo" "PR created: $pr_url ($current → $latest)"
+  fi
+
+  rm -f -- "$pr_body"
+  pr_body=""
+done < "$repositories_file"
+
+write_summary
+
+if [[ "$sdk_policy_errors" -gt 0 ]]; then
+  echo "::error::$sdk_policy_errors repository SDK policy error(s) were detected; no unsafe SDK mutation was applied for those repositories."
+fi
+
+if [[ "$ownership_errors" -gt 0 ]]; then
+  echo "::error::$ownership_errors repository mutation(s) were blocked because automation branch ownership could not be proven."
+fi
+
+if [[ "$repository_errors" -gt 0 ]]; then
+  echo "::error::$repository_errors repository operation(s) failed; remaining repositories were still processed."
+fi
+
+if [[ "$sdk_policy_errors" -gt 0 || "$ownership_errors" -gt 0 || "$repository_errors" -gt 0 ]]; then
+  exit 1
+fi

@@ -4,12 +4,14 @@ on:
   pull_request:
     paths:
       - ".github/workflows/dotnet-sdk-sync.yml"
+      - ".github/scripts/automation/dotnet-sdk-sync.sh"
       - ".github/workflows/dotnet-sdk-sync-privacy-validation.yml"
   push:
     branches:
       - main
     paths:
       - ".github/workflows/dotnet-sdk-sync.yml"
+      - ".github/scripts/automation/dotnet-sdk-sync.sh"
       - ".github/workflows/dotnet-sdk-sync-privacy-validation.yml"
   workflow_dispatch:
 
@@ -39,41 +41,17 @@ jobs:
 
           readonly WORKFLOW=".github/workflows/dotnet-sdk-sync.yml"
 
-          run_block="$(mktemp)"
-          trap 'rm -f "$run_block"' EXIT
+          readonly SCRIPT=".github/scripts/automation/dotnet-sdk-sync.sh"
+          grep -Fq 'run: bash "$GITHUB_WORKSPACE/.github/scripts/automation/dotnet-sdk-sync.sh"' "$WORKFLOW"
+          bash -n "$SCRIPT"
 
-          awk '
-            found {
-              if ($0 ~ /^[[:space:]]*$/) {
-                print
-                next
-              }
-              if ($0 ~ /^          /) {
-                sub(/^          /, "")
-                print
-                next
-              }
-              exit
-            }
-            /^        run: \|$/ {
-              found = 1
-            }
-          ' "$WORKFLOW" > "$run_block"
+          grep -Fq '.visibility == "public"' "$SCRIPT"
+          grep -Fq '["non_public"] | @tsv' "$SCRIPT"
+          grep -Fq 'if [[ "$visibility_marker" == "non_public" ]]; then' "$SCRIPT"
+          grep -Fq 'Non-public repositories skipped' "$SCRIPT"
 
-          if [[ ! -s "$run_block" ]]; then
-            echo "::error title=Validation setup failed::Unable to extract the SDK synchronization Bash run block."
-            exit 1
-          fi
-
-          bash -n "$run_block"
-
-          grep -Fq '.visibility == "public"' "$WORKFLOW"
-          grep -Fq '["non_public"] | @tsv' "$WORKFLOW"
-          grep -Fq 'if [[ "$visibility_marker" == "non_public" ]]; then' "$WORKFLOW"
-          grep -Fq 'Non-public repositories skipped' "$WORKFLOW"
-
-          guard_line="$(grep -Fn 'if [[ "$visibility_marker" == "non_public" ]]; then' "$WORKFLOW" | head -n 1 | cut -d: -f1)"
-          first_repo_log_line="$(grep -Fn 'log_result "$repo"' "$WORKFLOW" | head -n 1 | cut -d: -f1)"
+          guard_line="$(grep -Fn 'if [[ "$visibility_marker" == "non_public" ]]; then' "$SCRIPT" | head -n 1 | cut -d: -f1)"
+          first_repo_log_line="$(grep -Fn 'log_result "$repo"' "$SCRIPT" | head -n 1 | cut -d: -f1)"
 
           if [[ -z "$guard_line" || -z "$first_repo_log_line" || "$guard_line" -ge "$first_repo_log_line" ]]; then
             echo "::error title=Privacy guard ordering invalid::Non-public repositories must be rejected before repository-specific logging."
@@ -81,7 +59,7 @@ jobs:
           fi
 
           fixture="$(mktemp)"
-          trap 'rm -f "$run_block" "$fixture"' EXIT
+          trap 'rm -f "$fixture"' EXIT
 
           cat > "$fixture" <<'JSON'
           {

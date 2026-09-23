@@ -21,6 +21,8 @@ on:
       - ".github/scripts/batch-retry.sh"
       - ".github/scripts/test-batch-failure-isolation.sh"
       - ".github/scripts/test-inventory-timeout.sh"
+      - ".github/scripts/automation/**"
+      - ".github/scripts/test-automation-extraction.sh"
       - ".github/workflows/agent-governance-validation.yml"
       - ".github/workflows/reusable-secret-scan.yml"
       - ".github/workflows/control-plane-secret-scan.yml"
@@ -89,6 +91,7 @@ jobs:
             .github/scripts/batch-retry.sh
             .github/scripts/test-batch-failure-isolation.sh
             .github/scripts/test-inventory-timeout.sh
+            .github/scripts/test-automation-extraction.sh
             .github/scripts/agent-governance-manifest.sh
             .github/scripts/test-agent-governance-manifest.sh
             .github/scripts/validate-agent-governance.rb
@@ -123,6 +126,8 @@ jobs:
           set -Eeuo pipefail
 
           inventory=".github/workflows/dotnet-repository-inventory.yml"
+          inspector_checkout=".github/scripts/automation/dotnet-inventory-checkout-inspector.sh"
+          inspector_inventory=".github/scripts/automation/dotnet-inventory-inspection.sh"
 
           inspector_version="$(sed -n 's/^[[:space:]]*INSPECTOR_VERSION: "\([^"]*\)"/\1/p' "$inventory" | head -n 1)"
           inspector_sha="$(sed -n 's/^[[:space:]]*INSPECTOR_SHA: "\([0-9a-f]*\)"/\1/p' "$inventory" | head -n 1)"
@@ -137,15 +142,16 @@ jobs:
             exit 1
           fi
 
-          grep -Fq 'origin "$INSPECTOR_SHA"' "$inventory"
-          grep -Fq 'git -C .inspector checkout --detach --quiet FETCH_HEAD' "$inventory"
-          grep -Fq 'resolved_sha="$(git -C .inspector rev-parse HEAD)"' "$inventory"
-          grep -Fq 'inspector_version: $inspector_version' "$inventory"
-          grep -Fq 'inspector_sha: $inspector_sha' "$inventory"
-          grep -Fq '"inspector_version"' "$inventory"
-          grep -Fq '"inspector_sha"' "$inventory"
+          grep -Fq 'bash "$GITHUB_WORKSPACE/.github/scripts/automation/dotnet-inventory-checkout-inspector.sh"' "$inventory"
+          grep -Fq 'origin "$INSPECTOR_SHA"' "$inspector_checkout"
+          grep -Fq 'git -C .inspector checkout --detach --quiet FETCH_HEAD' "$inspector_checkout"
+          grep -Fq 'resolved_sha="$(git -C .inspector rev-parse HEAD)"' "$inspector_checkout"
+          grep -Fq 'inspector_version: $inspector_version' "$inspector_inventory"
+          grep -Fq 'inspector_sha: $inspector_sha' "$inspector_inventory"
+          grep -Fq '"inspector_version"' "$inspector_inventory"
+          grep -Fq '"inspector_sha"' "$inspector_inventory"
 
-          if grep -Eq -- '--branch[[:space:]]+(main|master)([[:space:]]|\\|$)' "$inventory"; then
+          if grep -Eq -- '--branch[[:space:]]+(main|master)([[:space:]]|\\|$)' "$inspector_checkout"; then
             echo "::error::DotNetRepoInspector checkout must not use main or master."
             exit 1
           fi
@@ -244,7 +250,7 @@ jobs:
           set -Eeuo pipefail
 
           policy=".github/scripts/dotnet-sdk-sync-policy.sh"
-          sdk=".github/workflows/dotnet-sdk-sync.yml"
+          sdk=".github/scripts/automation/dotnet-sdk-sync.sh"
 
           bash -n "$policy"
           source "$policy"
@@ -332,25 +338,13 @@ jobs:
             bash -n "$script"
           done
 
-          # Both automation steps must remain valid standalone Bash after
-          # extracting their inline run blocks from YAML.
-          fixture_root="$(mktemp -d)"
-          trap 'rm -rf -- "$fixture_root"' EXIT
-          for workflow in .github/workflows/dotnet-sdk-sync.yml .github/workflows/distribute-agent-skills.yml; do
-            filename="$(basename "$workflow")"
-            awk '
-              found {
-                if ($0 ~ /^[[:space:]]*$/) { print; next }
-                if ($0 ~ /^          /) { sub(/^          /, ""); print; next }
-                exit
-              }
-              /^        run: \|$/ { found = 1 }
-            ' "$workflow" > "$fixture_root/$filename.bash"
-            [[ -s "$fixture_root/$filename.bash" ]]
-            bash -n "$fixture_root/$filename.bash"
+          # Bash components are versioned separately from the workflow wrappers.
+          for script in .github/scripts/automation/*.sh; do
+            bash -n "$script"
           done
 
           bash .github/scripts/test-batch-failure-isolation.sh
+          bash .github/scripts/test-automation-extraction.sh
 
       - name: Validate inventory timeout and process-group cancellation
         shell: bash
@@ -366,9 +360,9 @@ jobs:
           set -Eeuo pipefail
 
           policy=".github/scripts/automation-branch-ownership.sh"
-          sdk=".github/workflows/dotnet-sdk-sync.yml"
-          upstream=".github/workflows/sync-agent-skills.yml"
-          distribution=".github/workflows/distribute-agent-skills.yml"
+          sdk=".github/scripts/automation/dotnet-sdk-sync.sh"
+          upstream=".github/scripts/automation/sync-agent-skills.sh"
+          distribution=".github/scripts/automation/distribute-agent-skills.sh"
 
           bash -n "$policy"
           grep -Fq 'verify_automation_branch_ownership' "$sdk"
@@ -526,10 +520,11 @@ jobs:
         run: |
           set -Eeuo pipefail
 
-          sync=".github/workflows/sync-agent-skills.yml"
+          sync=".github/scripts/automation/sync-agent-skills.sh"
+          sync_workflow=".github/workflows/sync-agent-skills.yml"
 
-          grep -Fq 'cron: "20 12 * * 1"' "$sync"
-          grep -Fq 'SOURCE_REPO: rodri-oliveira-dev/dotnet-library-template' "$sync"
+          grep -Fq 'cron: "20 12 * * 1"' "$sync_workflow"
+          grep -Fq 'SOURCE_REPO: rodri-oliveira-dev/dotnet-library-template' "$sync_workflow"
           grep -Fq 'readonly SYNC_BRANCH="chore/sync-upstream-agent-skills"' "$sync"
           grep -Fq 'gh pr create' "$sync"
           grep -Fq -- '--force-with-lease="refs/heads/$SYNC_BRANCH:$AUTOMATION_BRANCH_SHA"' "$sync"
@@ -547,11 +542,12 @@ jobs:
         run: |
           set -Eeuo pipefail
 
-          distribution=".github/workflows/distribute-agent-skills.yml"
+          distribution=".github/scripts/automation/distribute-agent-skills.sh"
+          distribution_workflow=".github/workflows/distribute-agent-skills.yml"
 
           grep -Fq 'readonly SYNC_BRANCH="chore/sync-agent-governance"' "$distribution"
-          grep -Fq 'permission-contents: write' "$distribution"
-          grep -Fq 'permission-pull-requests: write' "$distribution"
+          grep -Fq 'permission-contents: write' "$distribution_workflow"
+          grep -Fq 'permission-pull-requests: write' "$distribution_workflow"
           grep -Fq '[[ "$visibility" != "public" ]]' "$distribution"
           grep -Fq 'gh pr create' "$distribution"
           grep -Fq -- '--force-with-lease=' "$distribution"
@@ -560,7 +556,7 @@ jobs:
           source .github/scripts/agent-governance-manifest.sh
           agent_governance_validate_manifest
           grep -Fq 'agent_governance_mappings distribution "$manifest"' "$distribution"
-          grep -Fq '"agent-governance/manifest.json"' "$distribution"
-          grep -Fq '"agent-governance/skills/**"' "$distribution"
+          grep -Fq '"agent-governance/manifest.json"' "$distribution_workflow"
+          grep -Fq '"agent-governance/skills/**"' "$distribution_workflow"
           mapfile -t managed < <(agent_governance_mappings distribution)
           [[ "${#managed[@]}" -gt 0 ]]

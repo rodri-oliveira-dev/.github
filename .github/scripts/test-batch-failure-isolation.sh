@@ -4,8 +4,8 @@ set -Eeuo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$root/.github/scripts/batch-retry.sh"
 
-sdk="$root/.github/workflows/dotnet-sdk-sync.yml"
-distribution="$root/.github/workflows/distribute-agent-skills.yml"
+sdk="$root/.github/scripts/automation/dotnet-sdk-sync.sh"
+distribution="$root/.github/scripts/automation/distribute-agent-skills.sh"
 upstream="$root/.github/workflows/sync-agent-skills.yml"
 scratch="$(mktemp -d)"
 trap 'rm -rf -- "$scratch"' EXIT

@@ -68,6 +68,10 @@ O modelo de integração segue o princípio de menor privilégio: as permissões
 
 Branches reservadas de automação usam um contrato explícito de provenance em vez de confiar no nome da branch. Uma branch existente só pode ser atualizada quando um Pull Request aberto correspondente, no mesmo repositório, contém o marker de ownership esperado e seu head SHA corresponde ao ref remoto atual; force-updates ainda usam `--force-with-lease` vinculado explicitamente ao SHA capturado. Consulte [ownership de branches de automação](docs/automation-branch-ownership.pt-BR.md) para o contrato completo e o procedimento de recuperação de branches órfãs.
 
+## Implementação e testes locais das automações
+
+Os workflows de manutenção são camadas finas de orquestração. Os componentes Bash versionados, as fronteiras de confiança preservadas e as suítes de regressão offline estão documentados em [componentes de automação e validação local](docs/automation-components.md).
+
 ## Automações centrais de .NET
 
 O [manifesto canônico de agent governance](agent-governance/manifest.json) define as nove skills e a política de ownership/distribuição por artefato. Quatro skills mantidas no upstream são sincronizadas e oferecidas a consumidores existentes por Pull Request revisado; as outras cinco e as instruções do perfil permanecem manuais. A [documentação de agent governance](agent-governance/README.md) descreve o schema e a validação local.

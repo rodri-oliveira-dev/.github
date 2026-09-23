@@ -33,48 +33,33 @@ A versão revisada dos workflows reutilizáveis fica em
 O valor inicial é **`v1.0.0`**. Os consumidores devem aguardar a release e o
 alias `v1` ficarem visíveis antes de adotar os exemplos abaixo.
 
-A publicação é **dirigida por merge e protegida por review**: alterar
-`VERSION` exige Pull Request. Somente depois que essa mudança revisada chega
-à `main` o workflow
+Alterar `VERSION` exige Pull Request, mas a publicação é
+intencionalmente **manual e explícita**. Depois que a versão revisada chega à
+`main`, o mantenedor executa
 [Publish reusable workflow release](../.github/workflows/reusable-workflow-release.yml)
-executa com `contents: write`. Ele nunca executa em `pull_request`. O
-trigger de `push` aceita somente a `main` e somente mudanças no arquivo
-`VERSION`, portanto merges comuns não publicam releases.
-`workflow_dispatch` permanece disponível para retry/recuperação. Tanto a
-publicação automática quanto o retry manual resolvem o target para o último
-commit da `main` que alterou `VERSION`, impedindo que um merge posterior e não
-relacionado mude silenciosamente o conteúdo da release.
+por `workflow_dispatch` e informa o mesmo valor `vMAJOR.MINOR.PATCH`.
+O workflow nunca executa em `pull_request`, `pull_request_target`, `push`
+ou `schedule`, portanto o merge de um bump de versão não obtém automaticamente
+`contents: write`.
 
-**Pré-requisito obrigatório de proteção da branch:** o ruleset ativo
-`main-hardened` deve exigir pelo menos **uma aprovação de review** para Pull
-Requests e não pode ter **atores com bypass**; o mantenedor deve conferir
-a lista completa de bypass nas configurações do GitHub antes do merge.
-O job de publicação exige que seu `GITHUB_TOKEN` reporte
-`current_user_can_bypass: never`, rejeita qualquer lista não vazia de
-bypass *quando a API a retorna* e exige aprovação de outra pessoa no último
-commit do PR mergeado que alterou `VERSION`. O GitHub pode omitir
-`bypass_actors` para o token do job: campo ausente não comprova que a lista
-esteja vazia. A publicação falha de forma fechada se não puder confirmar
-a ausência de bypass **para o token de release**, a aprovação exigida pelo
-ruleset ou a procedência do PR aprovado. Versionar um arquivo não altera
-o ruleset ativo.
-
-O workflow resolve a versão a partir do arquivo revisado, valida o formato
-canônico `vMAJOR.MINOR.PATCH`, repositório, branch e SHA completo de 40
-caracteres, cria a tag imutável e a GitHub Release e então promove o alias da
-major correspondente. Ele recusa redirecionar tags existentes, rejeita
-regressão SemVer dentro da major e impede apontar o alias major para um commit
-que não descenda da versão anterior. Reexecutar a mesma versão no mesmo commit
-é idempotente. Se a release for publicada mas a promoção do alias falhar,
-corrija o problema antes de recomendar `@v1`; consumidores ainda podem usar
-uma tag exata/SHA verificados.
+O job manual confirma que a versão solicitada é exatamente a declarada em
+`.github/reusable-workflows/VERSION`, valida repositório, ref `main` e SHA
+completo de 40 caracteres, cria a tag imutável e a GitHub Release e promove o
+alias da major correspondente. Ele recusa redirecionar tags existentes,
+rejeita regressão SemVer dentro da major e impede apontar o alias major para
+um commit que não descenda da versão anterior. Reexecutar a mesma versão
+enquanto a `main` ainda aponta para o mesmo commit é idempotente. Se houver
+falha parcial, faça o retry antes de avançar a `main`; as verificações de
+imutabilidade falham de forma fechada em vez de mover silenciosamente uma
+versão publicada.
 
 Para uma versão compatível, incremente `VERSION` em PR revisado (por exemplo,
-`v1.0.1`) e faça merge na `main`; nunca mova `v1.0.0`. Mudanças
-incompatíveis exigem nova major (por exemplo, `v2.0.0`) com instruções de
-migração, preservando a major anterior para consumidores ainda não migrados.
-O alias major só muda por esse workflow privilegiado de release, nunca por
-renomeação de branch ou auto-merge de PR de dependências.
+`v1.0.1`), faça merge na `main` e execute explicitamente o workflow de
+release com essa versão; nunca mova `v1.0.0`. Mudanças incompatíveis exigem
+nova major (por exemplo, `v2.0.0`) com instruções de migração, preservando a
+major anterior para consumidores ainda não migrados. O alias major só muda por
+esse workflow manual privilegiado, nunca por renomeação de branch ou auto-merge
+de PR de dependências.
 
 ## Exemplo de consumidor
 
@@ -111,9 +96,10 @@ exige PR revisado e aprovação dos testes de governança existentes.
 1. Revise as notas de release e possíveis mudanças de inputs/outputs,
    runtime, secrets ou permissões. Incremente
    `.github/reusable-workflows/VERSION` em PR revisado, faça merge na
-   `main`, confira se a tag da release e o alias da major correspondente
-   (por exemplo, `v2` para `v2.0.0`) apontam para esse commit aprovado e
-   aguarde a conclusão do workflow.
+   `main`, execute manualmente o workflow de release com essa versão exata
+   e então confira se a tag da release e o alias da major correspondente
+   (por exemplo, `v2` para `v2.0.0`) apontam para o commit publicado da
+   `main` e aguarde a conclusão do workflow.
 2. O consumidor em `@v1` acompanha promoções compatíveis
    automaticamente; consumidores em `@v1.0.0` ou SHA devem atualizar
    o caller explicitamente em PR revisado e executar secret scanning

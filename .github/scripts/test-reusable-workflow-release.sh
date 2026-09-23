@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# No credentials needed: validate the release contract and reject unsafe inputs.
+# No credentials needed: validate the manual release contract and unsafe inputs.
 set -Eeuo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -9,22 +9,29 @@ workflow=".github/workflows/reusable-workflow-release.yml"
 version_file=".github/reusable-workflows/VERSION"
 [[ -s "$release" && -s "$workflow" && -s "$version_file" ]]
 bash -n "$release"
-grep -Fxq '  push:' "$workflow"
-grep -Fxq '      - main' "$workflow"
-grep -Fxq '      - ".github/reusable-workflows/VERSION"' "$workflow"
+
 grep -Fxq '  workflow_dispatch:' "$workflow"
+grep -Fq 'Approved stable version declared in .github/reusable-workflows/VERSION' "$workflow"
+grep -Fxq '        default: "v1.0.0"' "$workflow"
 grep -Fxq "    if: github.ref == 'refs/heads/main'" "$workflow"
 grep -Fxq '      contents: write' "$workflow"
-grep -Fxq '      pull-requests: read' "$workflow"
-grep -Fq 'bash .github/scripts/validate-reusable-workflow-release-approval.sh' "$workflow"
-grep -Fq 'RELEASE_VERSION: ${{ steps.version.outputs.version }}' "$workflow"
-grep -Fq 'RELEASE_TARGET_SHA: ${{ steps.version.outputs.target_sha }}' "$workflow"
-if grep -Eq '^[[:space:]]+(pull_request|pull_request_target):' "$workflow"; then
-  echo "::error::Privileged release publication must never run from a pull request event." >&2
+grep -Fq 'RELEASE_VERSION: ${{ inputs.version }}' "$workflow"
+grep -Fq 'does not match reviewed declaration' "$workflow"
+
+if grep -Eq '^[[:space:]]+(pull_request|pull_request_target|push|schedule):' "$workflow"; then
+  echo "::error::Privileged release publication must be manual-only." >&2
   exit 1
 fi
-if grep -Eq '^[[:space:]]+paths-ignore:' "$workflow"; then
-  echo "::error::Release publication must be scoped only by the reviewed VERSION path." >&2
+if grep -Fq 'pull-requests: write' "$workflow" || grep -Fq 'pull-requests: read' "$workflow"; then
+  echo "::error::Manual release does not need pull-request permissions." >&2
+  exit 1
+fi
+if grep -Fq 'validate-reusable-workflow-release-approval.sh' "$workflow"; then
+  echo "::error::Manual release must not depend on merged-PR approval provenance." >&2
+  exit 1
+fi
+if grep -Fq 'RELEASE_TARGET_SHA:' "$workflow"; then
+  echo "::error::Manual release should publish the explicitly selected main revision." >&2
   exit 1
 fi
 
@@ -37,7 +44,7 @@ declared_version="$(cat "$version_file")"
 export GITHUB_REPOSITORY="rodri-oliveira-dev/.github"
 export GITHUB_REF="refs/heads/main"
 export GITHUB_SHA="0123456789abcdef0123456789abcdef01234567"
-export RELEASE_TARGET_SHA="$GITHUB_SHA"
+unset RELEASE_TARGET_SHA
 export RELEASE_VERSION="$declared_version"
 
 bash "$release" --validate >/dev/null
@@ -58,12 +65,12 @@ RELEASE_VERSION="v1" reject "non-semver alias as a release"
 RELEASE_VERSION="main" reject "mutable branch as a release"
 GITHUB_REF="refs/heads/feature" reject "non-main branch"
 GITHUB_REPOSITORY="another/repository" reject "foreign repository"
-RELEASE_TARGET_SHA="main" reject "non-immutable target"
-# Without GH_TOKEN, only --validate is allowed (even from main).
+GITHUB_SHA="main" reject "non-immutable target"
+
 if GH_TOKEN="" bash "$release" > /dev/null 2>&1; then
   echo "::error::Publishing release unexpectedly succeeded without credentials." >&2
   exit 1
 fi
+
 bash .github/scripts/test-reusable-workflow-release-order.sh
-bash .github/scripts/test-reusable-workflow-release-approval.sh
-echo "Release trigger, reviewed VERSION contract, stable-tag policy, and negative fixtures passed."
+echo "Manual release trigger, reviewed VERSION declaration, stable-tag policy, and negative fixtures passed."

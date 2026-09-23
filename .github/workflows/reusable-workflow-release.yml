@@ -1,15 +1,15 @@
 name: Publish reusable workflow release
 
-# Publication is privileged and must never run on an untrusted pull_request.
-# A reviewed VERSION bump publishes only after it reaches main. Manual dispatch
-# is retained for idempotent retry/recovery of the version declared on main.
+# Publication is privileged and intentionally manual. It never runs from
+# pull_request, pull_request_target, push, or schedule events.
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - ".github/reusable-workflows/VERSION"
   workflow_dispatch:
+    inputs:
+      version:
+        description: "Approved stable version declared in .github/reusable-workflows/VERSION"
+        required: true
+        type: string
+        default: "v1.0.0"
 
 permissions:
   contents: read
@@ -26,7 +26,6 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: write
-      pull-requests: read
     steps:
       - name: Checkout reviewed main revision
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -35,9 +34,10 @@ jobs:
           fetch-tags: true
           persist-credentials: false
 
-      - name: Resolve reviewed release version
-        id: version
+      - name: Verify requested version matches reviewed declaration
         shell: bash
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
         run: |
           set -Eeuo pipefail
 
@@ -47,51 +47,31 @@ jobs:
             exit 1
           }
 
-          version="$(cat "$version_file")"
-          [[ "$version" =~ ^v([1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || {
+          declared_version="$(cat "$version_file")"
+          [[ "$declared_version" =~ ^v([1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || {
             echo "::error title=Reusable workflow release::$version_file must contain one canonical vMAJOR.MINOR.PATCH value."
             exit 1
           }
 
-          target_sha="$(git log -1 --format=%H -- "$version_file")"
-          [[ "$target_sha" =~ ^[0-9a-f]{40}$ ]] || {
-            echo "::error title=Reusable workflow release::Cannot resolve the reviewed commit that changed $version_file."
+          [[ "$RELEASE_VERSION" == "$declared_version" ]] || {
+            echo "::error title=Reusable workflow release::Requested version $RELEASE_VERSION does not match reviewed declaration $declared_version."
             exit 1
           }
-          git merge-base --is-ancestor "$target_sha" HEAD || {
-            echo "::error title=Reusable workflow release::Resolved release target is not an ancestor of main."
-            exit 1
-          }
-
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "target_sha=$target_sha" >> "$GITHUB_OUTPUT"
 
       - name: Validate release request
         shell: bash
         env:
-          RELEASE_VERSION: ${{ steps.version.outputs.version }}
-          RELEASE_TARGET_SHA: ${{ steps.version.outputs.target_sha }}
+          RELEASE_VERSION: ${{ inputs.version }}
         run: |
           set -Eeuo pipefail
           bash -n .github/scripts/release-reusable-workflows.sh
           bash .github/scripts/release-reusable-workflows.sh --validate
 
-      - name: Verify mandatory review and approved release provenance
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_TARGET_SHA: ${{ steps.version.outputs.target_sha }}
-        run: |
-          set -Eeuo pipefail
-          bash -n .github/scripts/validate-reusable-workflow-release-approval.sh
-          bash .github/scripts/validate-reusable-workflow-release-approval.sh
-
       - name: Create immutable release and promote major alias
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_VERSION: ${{ steps.version.outputs.version }}
-          RELEASE_TARGET_SHA: ${{ steps.version.outputs.target_sha }}
+          RELEASE_VERSION: ${{ inputs.version }}
         run: |
           set -Eeuo pipefail
           bash .github/scripts/release-reusable-workflows.sh

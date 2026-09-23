@@ -16,6 +16,7 @@ grep -Fxq '  workflow_dispatch:' "$workflow"
 grep -Fxq "    if: github.ref == 'refs/heads/main'" "$workflow"
 grep -Fxq '      contents: write' "$workflow"
 grep -Fq 'RELEASE_VERSION: ${{ steps.version.outputs.version }}' "$workflow"
+grep -Fq 'RELEASE_TARGET_SHA: ${{ steps.version.outputs.target_sha }}' "$workflow"
 if grep -Eq '^[[:space:]]+(pull_request|pull_request_target):' "$workflow"; then
   echo "::error::Privileged release publication must never run from a pull request event." >&2
   exit 1
@@ -34,6 +35,7 @@ declared_version="$(cat "$version_file")"
 export GITHUB_REPOSITORY="rodri-oliveira-dev/.github"
 export GITHUB_REF="refs/heads/main"
 export GITHUB_SHA="0123456789abcdef0123456789abcdef01234567"
+export RELEASE_TARGET_SHA="$GITHUB_SHA"
 export RELEASE_VERSION="$declared_version"
 
 bash "$release" --validate >/dev/null
@@ -54,7 +56,7 @@ RELEASE_VERSION="v1" reject "non-semver alias as a release"
 RELEASE_VERSION="main" reject "mutable branch as a release"
 GITHUB_REF="refs/heads/feature" reject "non-main branch"
 GITHUB_REPOSITORY="another/repository" reject "foreign repository"
-GITHUB_SHA="main" reject "non-immutable target"
+RELEASE_TARGET_SHA="main" reject "non-immutable target"
 # Without GH_TOKEN, only --validate is allowed (even from main).
 if GH_TOKEN="" bash "$release" > /dev/null 2>&1; then
   echo "::error::Publishing release unexpectedly succeeded without credentials." >&2

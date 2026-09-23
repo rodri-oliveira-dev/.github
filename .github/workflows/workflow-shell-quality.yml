@@ -1,0 +1,80 @@
+name: Workflow and shell quality
+
+# A required check must be created for every PR, regardless of changed paths.
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: workflow-shell-quality-${{ github.event.pull_request.number || github.ref_name || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: Validate workflows and shell
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository without persisted credentials
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install SHA256-verified quality tools
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          if [[ "$(uname -m)" != "x86_64" ]]; then
+            echo "::error title=Unsupported architecture::Pinned tools require linux_amd64."
+            exit 1
+          fi
+
+          readonly actionlint_version="1.7.12"
+          readonly actionlint_sha256="8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8"
+          readonly shellcheck_version="0.11.0"
+          readonly shellcheck_sha256="b7af85e41cc99489dcc21d66c6d5f3685138f06d34651e6d34b42ec6d54fe6f6"
+
+          tools_dir="$RUNNER_TEMP/quality-tools"
+          mkdir -p "$tools_dir/bin" "$tools_dir/actionlint" "$tools_dir/shellcheck"
+          actionlint_archive="$tools_dir/actionlint.tar.gz"
+          shellcheck_archive="$tools_dir/shellcheck.tar.gz"
+
+          curl --fail --silent --show-error --location --retry 3 --proto '=https' \
+            "https://github.com/rhysd/actionlint/releases/download/v${actionlint_version}/actionlint_${actionlint_version}_linux_amd64.tar.gz" \
+            --output "$actionlint_archive"
+          echo "$actionlint_sha256  $actionlint_archive" | sha256sum --check --status
+          tar -xzf "$actionlint_archive" -C "$tools_dir/actionlint" actionlint
+          install -m 0755 "$tools_dir/actionlint/actionlint" "$tools_dir/bin/actionlint"
+
+          curl --fail --silent --show-error --location --retry 3 --proto '=https' \
+            "https://github.com/koalaman/shellcheck/releases/download/v${shellcheck_version}/shellcheck-v${shellcheck_version}.linux.x86_64.tar.gz" \
+            --output "$shellcheck_archive"
+          echo "$shellcheck_sha256  $shellcheck_archive" | sha256sum --check --status
+          tar -xzf "$shellcheck_archive" -C "$tools_dir/shellcheck" \
+            "shellcheck-v${shellcheck_version}/shellcheck"
+          install -m 0755 "$tools_dir/shellcheck/shellcheck-v${shellcheck_version}/shellcheck" \
+            "$tools_dir/bin/shellcheck"
+
+          echo "$tools_dir/bin" >> "$GITHUB_PATH"
+
+      - name: Validate all workflows and automation Bash scripts
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          bash -n .github/scripts/workflow-quality-gate.sh
+          bash .github/scripts/workflow-quality-gate.sh
+
+      - name: Verify quality gate regression fixtures
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          bash -n .github/scripts/test-workflow-quality-gate.sh
+          bash .github/scripts/test-workflow-quality-gate.sh

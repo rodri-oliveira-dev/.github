@@ -252,6 +252,7 @@ See [`docs/agent-governance.md`](docs/agent-governance.md) for the composition m
 ├── .gitattributes
 ├── .github/
 │   ├── FUNDING.yml
+│   ├── dependabot.yml
 │   └── workflows/
 │       ├── agent-governance-validation.yml
 │       ├── distribute-agent-skills.yml

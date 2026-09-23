@@ -32,11 +32,18 @@ jq -e --arg repo "$repo" '
   .enforcement == "active" and
   (.conditions.ref_name.include | index("~DEFAULT_BRANCH") != null) and
   (.conditions.ref_name.exclude | length == 0) and
-  (.bypass_actors | type == "array" and length == 0) and
+  # The GITHUB_TOKEN cannot see the full bypass_actors list unless it has
+  # ruleset-write access. Never interpret an omitted field as an empty list:
+  # require the release principal itself to have no bypass permission, and
+  # reject any nonempty bypass list when GitHub does return it.
+  (.current_user_can_bypass == "never") and
+  (if has("bypass_actors") then
+    (.bypass_actors | type == "array" and length == 0)
+   else true end) and
   ([.rules[] | select(.type == "pull_request" and
     (.parameters.required_approving_review_count >= 1))] | length == 1)
 ' <<< "$ruleset" >/dev/null ||
-  die "Release blocked: main-hardened must require at least one approving review with no bypass actors. Update the active ruleset before publication."
+  die "Release blocked: main-hardened must require an approving review, the release token must not bypass it, and any visible bypass list must be empty. Update the active ruleset before publication."
 
 associated="$(gh api "repos/$repo/commits/$target/pulls?per_page=100")" ||
   die "Cannot trace the release target to its merged Pull Request."

@@ -11,6 +11,9 @@ mkdir -p "$fixtures/bin"
 export MOCK_TAGS="$fixtures/tags"
 export MOCK_CALLS="$fixtures/calls"
 export MOCK_ALIAS_SHA="1111111111111111111111111111111111111111"
+# Keep this suite self-contained when invoked by the parent test, which may
+# export RELEASE_TARGET_SHA for its own validation fixtures.
+unset RELEASE_TARGET_SHA
 export GITHUB_REPOSITORY="rodri-oliveira-dev/.github"
 export GITHUB_REF="refs/heads/main"
 export GH_TOKEN="fake-fixture-token"

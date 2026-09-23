@@ -42,6 +42,13 @@ available for retry/recovery. Both automatic publication and manual retry
 resolve the target to the last `main` commit that changed `VERSION`, so an
 unrelated later merge cannot silently change the release contents.
 
+**Required branch-protection prerequisite:** the active `main-hardened` ruleset
+must require at least **one approving review** for Pull Requests and must have
+**no bypass actors**. Publication fails closed if that configuration is absent,
+or if the merged `VERSION` Pull Request lacks a non-author approval of its final
+head commit. The GitHub repository setting must be updated before merging the
+bootstrap PR; changing a file in this repository does not apply a ruleset.
+
 The workflow resolves the version from the reviewed file, validates canonical
 `vMAJOR.MINOR.PATCH` format, repository, branch and full 40-character commit
 SHA, creates the immutable tag and GitHub Release, then advances the matching
@@ -93,7 +100,8 @@ separate reviewed PR and the existing governance tests.
 1. Review the release notes and any input/output, runtime or secret/
    permission changes. Bump `.github/reusable-workflows/VERSION` in a
    reviewed PR, merge it to `main`, then verify the candidate release and
-   `v1` point to that approved commit and wait for the release job to succeed.
+   its matching major alias (for example, `v2` for `v2.0.0`) point to that
+   approved commit and wait for the release job to succeed.
 2. A consumer on `@v1` automatically follows compatible promotions; a
    consumer on `@v1.0.0` or a SHA must explicitly change its caller in a
    reviewed PR and rerun secret scanning and repository-specific CI.

@@ -268,6 +268,7 @@ See [`docs/agent-governance.md`](docs/agent-governance.md) for the composition m
 │       ├── dotnet-repository-inventory.yml
 │       ├── dotnet-sdk-sync.yml
 │       ├── reusable-secret-scan.yml
+│       ├── reusable-workflow-release.yml
 │       └── sync-agent-skills.yml
 ├── .github.code-workspace
 ├── .gitignore
@@ -279,6 +280,8 @@ See [`docs/agent-governance.md`](docs/agent-governance.md) for the composition m
 ├── docs/
 │   ├── agent-governance.md
 │   ├── agent-governance.pt-BR.md
+│   ├── reusable-workflow-versioning.md
+│   ├── reusable-workflow-versioning.pt-BR.md
 │   ├── secret-scanning.md
 │   └── secret-scanning.pt-BR.md
 ├── CONTRIBUTING.md

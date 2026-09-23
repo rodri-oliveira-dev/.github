@@ -73,6 +73,10 @@ Reserved automation branches use an explicit provenance contract rather than tru
 
 The maintenance workflows are thin orchestration layers. Their versioned Bash components, preserved trust boundaries, and offline regression suites are documented in [automation components and local validation](docs/automation-components.md).
 
+## Workflow and shell quality gate
+
+The [Workflow and shell quality](.github/workflows/workflow-shell-quality.yml) workflow checks all Pull Requests with actionlint and ShellCheck, without a pull-request path filter. The job check `Validate workflows and shell` can be added to the `main-hardened` required checks once its first run exists. See [quality gate documentation and local validation](docs/workflow-quality-gate.md) for reproducible tooling and the ruleset activation steps.
+
 ## GitHub Actions dependency maintenance
 
 [Dependabot](.github/dependabot.yml) checks the GitHub Actions used by this control plane **every Tuesday at 10:00 (America/Sao_Paulo)**. It opens version-update Pull Requests against `main` for review; this is repository-local configuration, **not** an inherited community-health default for other repositories. No GitHub App credentials, new permissions or auto-merge configuration are needed.

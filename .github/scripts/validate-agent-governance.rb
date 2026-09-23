@@ -24,7 +24,7 @@ def reject_duplicate_keys!(node, path)
       reject_duplicate_keys!(value, path)
     end
   elsif node.respond_to?(:children)
-    node.children.each { |child| reject_duplicate_keys!(child, path) }
+    Array(node.children).each { |child| reject_duplicate_keys!(child, path) }
   end
 end
 

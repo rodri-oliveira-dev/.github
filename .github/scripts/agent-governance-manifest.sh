@@ -55,7 +55,7 @@ agent_governance_validate_manifest() {
     return 1
   fi
 
-  local source expected_name actual_name
+  local source
   while IFS= read -r source; do
     if [[ ! -s "$source" ]]; then
       echo "::error title=Missing governance source::$source is missing or empty." >&2
@@ -63,19 +63,9 @@ agent_governance_validate_manifest() {
     fi
   done < <(jq -r '.profiles[].source, .skills[].source' "$manifest")
 
-  # This is also called by both automation workflows before any branch mutation,
-  # so a mislabeled source cannot be distributed merely because a PR gate is skipped.
-  while IFS=$'\t' read -r source expected_name; do
-    if [[ "$(head -n 1 "$source")" != "---" ]]; then
-      echo "::error title=Invalid canonical skill::$source is missing YAML frontmatter." >&2
-      return 1
-    fi
-    actual_name="$(sed -n 's/^name: //p' "$source" | head -n 1)"
-    if [[ "$actual_name" != "$expected_name" ]]; then
-      echo "::error title=Skill name mismatch::$source declares '$actual_name'; manifest expects '$expected_name'." >&2
-      return 1
-    fi
-  done < <(jq -r '.skills[] | [.source, .name] | @tsv' "$manifest")
+  # A single semantic YAML/catalog check protects the merge gate and every
+  # automation preflight. Do not re-parse frontmatter via sed/grep here.
+  ruby .github/scripts/validate-agent-governance.rb "$manifest" "$version_file"
 }
 
 # Output exactly the allowlisted managed mappings. The caller must validate

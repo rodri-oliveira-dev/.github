@@ -10,14 +10,14 @@ die() {
 
 version="${RELEASE_VERSION:-}"
 ref="${GITHUB_REF:-}"
-target="${GITHUB_SHA:-}"
+target="${RELEASE_TARGET_SHA:-${GITHUB_SHA:-}}"
 repo="${GITHUB_REPOSITORY:-}"
 
 [[ "$version" =~ ^v([1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] ||
   die "RELEASE_VERSION must be vMAJOR.MINOR.PATCH with no leading zeroes."
 major="v${BASH_REMATCH[1]}"
 [[ "$ref" == "refs/heads/main" ]] || die "Releases must run on main."
-[[ "$target" =~ ^[0-9a-f]{40}$ ]] || die "GITHUB_SHA must be a full 40-character commit SHA."
+[[ "$target" =~ ^[0-9a-f]{40}$ ]] || die "Release target must be a full 40-character commit SHA."
 [[ "$repo" == "rodri-oliveira-dev/.github" ]] || die "Release repository does not match the control plane."
 
 # Dry validation is safe to run in every PR without GitHub credentials.
@@ -29,6 +29,10 @@ fi
 [[ -n "${GH_TOKEN:-}" ]] || die "GH_TOKEN is required for publication."
 command -v gh >/dev/null 2>&1 || die "gh CLI is required."
 command -v git >/dev/null 2>&1 || die "git is required."
+git cat-file -e "${target}^{commit}" 2>/dev/null ||
+  die "Release target does not exist in the checked-out main history."
+git merge-base --is-ancestor "$target" HEAD ||
+  die "Release target is not an ancestor of the checked-out main revision."
 
 # Query the full tag catalog before any publication; API errors fail closed.
 # Each record contains the tag name and its peeled commit SHA.

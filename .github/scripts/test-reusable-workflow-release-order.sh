@@ -42,6 +42,7 @@ GH
 cat > "$fixtures/bin/git" <<'GIT'
 #!/usr/bin/env bash
 set -Eeuo pipefail
+if [[ "${1:-}" == cat-file && "${2:-}" == -e ]]; then exit 0; fi
 if [[ "$*" == merge-base\ --is-ancestor\ * ]]; then exit 0; fi
 printf 'Unexpected mock git invocation: %s\n' "$*" >&2
 exit 2

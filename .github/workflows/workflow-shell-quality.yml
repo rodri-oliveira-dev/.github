@@ -79,6 +79,13 @@ jobs:
           bash -n .github/scripts/test-workflow-quality-gate.sh
           bash .github/scripts/test-workflow-quality-gate.sh
 
+      - name: Validate inherited community-health defaults
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ruby -c .github/scripts/test-community-health-defaults.rb
+          ruby .github/scripts/test-community-health-defaults.rb
+
       - name: Verify reusable workflow release policy
         shell: bash
         run: |

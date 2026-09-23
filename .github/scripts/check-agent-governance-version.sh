@@ -79,7 +79,20 @@ while IFS= read -r -d '' path; do
                                    permitted_symbols: [], aliases: false)
             abort "Invalid governance profile YAML" unless data.is_a?(Hash)
             data.delete("governance_version")
-            puts JSON.generate(data.sort.to_h)
+            # Canonicalize every mapping, including mappings nested in arrays.
+            # Preserve array ordering and scalar types: those are contractual.
+            canonicalize = lambda do |value|
+              case value
+              when Hash
+                value.sort_by { |key, _| key.to_s }
+                     .to_h { |key, item| [key, canonicalize.call(item)] }
+              when Array
+                value.map { |item| canonicalize.call(item) }
+              else
+                value
+              end
+            end
+            puts JSON.generate(canonicalize.call(data))
           ' "$1"
         }
         if ! profile_to_json "$scratch/base-profile.yml" > "$scratch/base-profile.normalized" ||

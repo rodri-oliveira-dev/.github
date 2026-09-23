@@ -11,6 +11,10 @@ on:
       - "docs/secret-scanning*.md"
       - ".github/actions/secret-scan-size-policy/**"
       - ".github/scripts/automation-branch-ownership.sh"
+      - ".github/scripts/validate-agent-governance.rb"
+      - ".github/scripts/test-agent-governance-semantic.rb"
+      - ".github/scripts/agent-governance-manifest.sh"
+      - ".github/scripts/test-agent-governance-manifest.sh"
       - ".github/scripts/dotnet-sdk-sync-policy.sh"
       - ".github/scripts/batch-retry.sh"
       - ".github/scripts/test-batch-failure-isolation.sh"
@@ -85,6 +89,8 @@ jobs:
             .github/scripts/test-inventory-timeout.sh
             .github/scripts/agent-governance-manifest.sh
             .github/scripts/test-agent-governance-manifest.sh
+            .github/scripts/validate-agent-governance.rb
+            .github/scripts/test-agent-governance-semantic.rb
             .github/scripts/check-agent-governance-version.sh
             .github/scripts/test-agent-governance-version.sh
             .github/workflows/reusable-secret-scan.yml
@@ -98,88 +104,16 @@ jobs:
             fi
           done
 
-      - name: Validate skill metadata
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-
-          source .github/scripts/agent-governance-manifest.sh
-          agent_governance_validate_manifest
-          mapfile -t skills < <(jq -r '.skills[].source' agent-governance/manifest.json | sort)
-          mapfile -t files_on_disk < <(find agent-governance/skills -type f -name SKILL.md | sort)
-          if [[ "${skills[*]}" != "${files_on_disk[*]}" ]]; then
-            echo "::error::Manifest and canonical skill files differ."
-            exit 1
-          fi
-
-          declare -A names=()
-          while IFS='|' read -r file expected_name; do
-            if [[ "$(head -n 1 "$file")" != "---" ]]; then
-              echo "::error::$file must start with YAML frontmatter."
-              exit 1
-            fi
-
-            name="$(sed -n 's/^name: //p' "$file" | head -n 1)"
-            description="$(sed -n 's/^description: //p' "$file" | head -n 1)"
-            license="$(sed -n 's/^license: //p' "$file" | head -n 1)"
-
-            if [[ ! "$name" =~ ^[a-z0-9][a-z0-9-]*$ ]]; then
-              echo "::error::$file has invalid or missing skill name."
-              exit 1
-            fi
-            if [[ "$name" != "$expected_name" ]]; then
-              echo "::error::$file declares '$name' but manifest expects '$expected_name'."
-              exit 1
-            fi
-            if [[ -z "$description" ]]; then
-              echo "::error::$file is missing description."
-              exit 1
-            fi
-            if [[ "$license" != "MIT" ]]; then
-              echo "::error::$file must declare license: MIT."
-              exit 1
-            fi
-            if [[ -n "${names[$name]:-}" ]]; then
-              echo "::error::Duplicate skill name: $name."
-              exit 1
-            fi
-            names[$name]="$file"
-          done < <(jq -r '.skills[] | [.source, .name] | join("|")' agent-governance/manifest.json)
-
-      - name: Validate canonical governance manifest and mappings
+      - name: Validate semantic governance catalog and regression suite
         shell: bash
         run: |
           set -Eeuo pipefail
           bash -n .github/scripts/agent-governance-manifest.sh
           bash -n .github/scripts/test-agent-governance-manifest.sh
+          ruby -c .github/scripts/validate-agent-governance.rb
+          ruby -c .github/scripts/test-agent-governance-semantic.rb
           bash .github/scripts/test-agent-governance-manifest.sh
-
-      - name: Validate dotnet-library profile
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-
-          version="$(tr -d '[:space:]' < agent-governance/VERSION)"
-          profile="agent-governance/profiles/dotnet-library/profile.yml"
-          agents="agent-governance/profiles/dotnet-library/AGENTS.md"
-
-          grep -Fxq "profile: dotnet-library" "$profile"
-          grep -Fxq "governance_version: $version" "$profile"
-          grep -Fxq 'manifest: ../../manifest.json' "$profile"
-          grep -Fq 'agent_governance_mappings upstream "$manifest"' .github/workflows/sync-agent-skills.yml
-          grep -Fq 'agent_governance_mappings distribution "$manifest"' .github/workflows/distribute-agent-skills.yml
-
-          grep -Fq "## Gerenciamento de contexto" "$agents"
-          grep -Fq "350 linhas" "$agents"
-          grep -Fq "## Roteamento de tarefas e delegação" "$agents"
-          grep -Fq "Validação determinística prevalece" "$agents"
-          grep -Fq "dotnet restore --locked-mode" "$agents"
-          grep -Fq "dotnet build --configuration Release --no-restore" "$agents"
-          grep -Fq "dotnet test --configuration Release --no-build" "$agents"
-
-          # Manifest path references are checked by the shared validator.
-
-
+          ruby .github/scripts/test-agent-governance-semantic.rb
 
       - name: Validate DotNetRepoInspector immutable pin
         shell: bash

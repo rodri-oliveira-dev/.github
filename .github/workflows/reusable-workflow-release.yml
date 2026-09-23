@@ -52,12 +52,24 @@ jobs:
             exit 1
           }
 
+          target_sha="$(git log -1 --format=%H -- "$version_file")"
+          [[ "$target_sha" =~ ^[0-9a-f]{40}$ ]] || {
+            echo "::error title=Reusable workflow release::Cannot resolve the reviewed commit that changed $version_file."
+            exit 1
+          }
+          git merge-base --is-ancestor "$target_sha" HEAD || {
+            echo "::error title=Reusable workflow release::Resolved release target is not an ancestor of main."
+            exit 1
+          }
+
           echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "target_sha=$target_sha" >> "$GITHUB_OUTPUT"
 
       - name: Validate release request
         shell: bash
         env:
           RELEASE_VERSION: ${{ steps.version.outputs.version }}
+          RELEASE_TARGET_SHA: ${{ steps.version.outputs.target_sha }}
         run: |
           set -Eeuo pipefail
           bash -n .github/scripts/release-reusable-workflows.sh
@@ -68,6 +80,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_VERSION: ${{ steps.version.outputs.version }}
+          RELEASE_TARGET_SHA: ${{ steps.version.outputs.target_sha }}
         run: |
           set -Eeuo pipefail
           bash .github/scripts/release-reusable-workflows.sh

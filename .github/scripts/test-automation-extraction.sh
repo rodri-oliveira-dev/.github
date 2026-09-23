@@ -104,4 +104,3 @@ if env -u GH_TOKEN -u GITHUB_TOKEN -u DOTNET_SDK_SYNC_APP_CLIENT_ID \
 fi
 
 echo "Extracted automation wrappers, shell syntax, discovery privacy and inspection trust boundary passed."
- "$workflow"; then

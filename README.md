@@ -35,7 +35,7 @@ Repository-specific files always take precedence when a project needs different 
 | [`.github/workflows/dotnet-sdk-sync.yml`](.github/workflows/dotnet-sdk-sync.yml) | Central automation that checks repository-root `global.json` files and opens SDK update Pull Requests when appropriate. |
 | [`.github/workflows/dotnet-repository-inventory.yml`](.github/workflows/dotnet-repository-inventory.yml) | Central read-only automation that inventories .NET projects across repositories accessible to the configured GitHub App. |
 | [`.github/workflows/reusable-secret-scan.yml`](.github/workflows/reusable-secret-scan.yml) | Reusable, language-agnostic Git-history secret scanning policy for .NET and future stacks such as Node.js, React, Java, Python, Go, Terraform, Kubernetes, and Docker. |
-| [`.github/workflows/reusable-workflow-release.yml`](.github/workflows/reusable-workflow-release.yml) | Manual release of reviewed reusable-workflow versions from `main`, with immutable SemVer tags and promoted major aliases. |
+| [`.github/workflows/reusable-workflow-release.yml`](.github/workflows/reusable-workflow-release.yml) | Publishes reviewed reusable-workflow versions after a `VERSION` bump reaches `main`, with manual idempotent retry, immutable SemVer tags, and promoted major aliases. |
 | [`.github/workflows/control-plane-secret-scan.yml`](.github/workflows/control-plane-secret-scan.yml) | Applies the reusable secret-scanning policy to this control plane on every Pull Request, pushes to `main`, scheduled audits, and manual runs. |
 | [`.github/workflows/agent-governance-validation.yml`](.github/workflows/agent-governance-validation.yml) | Deterministic validation for the central agent-governance registry, profile mappings, managed skills, and synchronization/distribution contracts. |
 | [`.github/workflows/sync-agent-skills.yml`](.github/workflows/sync-agent-skills.yml) | Weekly upstream synchronization of four allowlisted .NET skills from `dotnet-library-template` into the central registry through a reviewed Pull Request. |
@@ -86,7 +86,7 @@ The [Workflow and shell quality](.github/workflows/workflow-shell-quality.yml) w
 
 ## Versioned reusable workflows
 
-Reusable workflows follow a reviewed release contract: immutable `vMAJOR.MINOR.PATCH` tags, a deliberately moving backward-compatible `vMAJOR` alias for consumers, and full commit SHA for strict reproducibility. The initial `v1.0.0` release and `v1` alias **must be published after this change merges to `main`**; they are not yet available for consumer use. [Versioning, release, update and rollback policy](docs/reusable-workflow-versioning.md) describes the manual, permission-scoped [release workflow](.github/workflows/reusable-workflow-release.yml) and consumer examples. The control plane's own required scanner caller remains SHA-pinned.
+Reusable workflows follow a reviewed release contract: immutable `vMAJOR.MINOR.PATCH` tags, a deliberately moving backward-compatible `vMAJOR` alias for consumers, and full commit SHA for strict reproducibility. The reviewed version is declared in [`.github/reusable-workflows/VERSION`](.github/reusable-workflows/VERSION); changing it requires a Pull Request, and the merge to `main` triggers the permission-scoped [release workflow](.github/workflows/reusable-workflow-release.yml). The initial value is `v1.0.0`; consumers should adopt `@v1` only after the release and alias are visible. [Versioning, release, update and rollback policy](docs/reusable-workflow-versioning.md) documents the promotion and recovery flow. The control plane's own required scanner caller remains SHA-pinned.
 
 ## GitHub Actions dependency maintenance
 
@@ -273,6 +273,8 @@ See [`docs/agent-governance.md`](docs/agent-governance.md) for the composition m
 │   ├── FUNDING.yml
 │   ├── PULL_REQUEST_TEMPLATE.md
 │   ├── dependabot.yml
+│   ├── reusable-workflows/
+│   │   └── VERSION
 │   └── workflows/
 │       ├── agent-governance-validation.yml
 │       ├── distribute-agent-skills.yml

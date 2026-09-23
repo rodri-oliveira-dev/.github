@@ -105,7 +105,12 @@ class GovernanceSemanticTest < Minitest::Test
   end
 
   def test_yaml_alias_fails_closed
-    change_file(first_skill) { |value| value.sub(/^description: .+$/, "description: *unknown") }
+    # A defined alias would be valid YAML if the loader permitted aliases:
+    # this fixture proves that the policy rejects aliases, not just bad syntax.
+    change_file(first_skill) do |value|
+      value.sub(/^name: (.+)$/, 'name: &skill_name \\1')
+           .sub(/^description: .+$/, "description: *skill_name")
+    end
     assert_invalid("invalid or unsafe YAML")
   end
 

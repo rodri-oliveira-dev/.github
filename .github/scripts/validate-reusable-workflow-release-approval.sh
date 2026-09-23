@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Fail closed unless the VERSION change was reviewed and main protection
-# currently requires approval without bypass. No Git refs are mutated here.
+# Fail closed unless VERSION was reviewed, main requires approval, and the
+# release token cannot bypass that protection. No Git refs are mutated here.
 set -Eeuo pipefail
 
 die() {

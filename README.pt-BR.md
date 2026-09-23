@@ -7,13 +7,13 @@
 [![Sincronizar skills upstream](https://github.com/rodri-oliveira-dev/.github/actions/workflows/sync-agent-skills.yml/badge.svg)](https://github.com/rodri-oliveira-dev/.github/actions/workflows/sync-agent-skills.yml)
 [![Distribuir skills gerenciadas](https://github.com/rodri-oliveira-dev/.github/actions/workflows/distribute-agent-skills.yml/badge.svg)](https://github.com/rodri-oliveira-dev/.github/actions/workflows/distribute-agent-skills.yml)
 
-Repositório central para padrões compartilhados de comunidade, automações de manutenção e governança de agentes dos repositórios mantidos na conta `rodri-oliveira-dev`.
+Defaults compartilhados de community health e control plane de governança/automação para os repositórios mantidos na conta `rodri-oliveira-dev`.
 
 > 🇺🇸 [Read in English](README.md)
 
 ## Objetivo
 
-Este repositório fornece uma base consistente para contribuição, segurança, financiamento, políticas de manutenção e governança de agentes, evitando duplicar a mesma configuração em vários projetos.
+Este repositório fornece uma base consistente para contribuição, segurança, suporte, conduta, entrada de issues/PRs, financiamento, políticas de manutenção e governança de agentes, evitando duplicar a mesma configuração em vários projetos.
 
 Arquivos específicos de cada repositório sempre têm prioridade quando um projeto precisa de regras, workflows, requisitos de compatibilidade, políticas de suporte ou instruções locais de agentes diferentes.
 
@@ -24,8 +24,12 @@ Arquivos específicos de cada repositório sempre têm prioridade quando um proj
 | [`.gitattributes`](.gitattributes) | Normalização local de quebras de linha e diff para documentação, JSON e workflows do GitHub Actions. |
 | [`.gitignore`](.gitignore) | Regras locais de ignore para artifacts gerados, arquivos temporários de validação, checkouts locais de ferramentas e arquivos de editor/SO. |
 | [`.github.code-workspace`](.github.code-workspace) | Configurações de workspace do VS Code e recomendações de extensões para edição consistente de Markdown, YAML e GitHub Actions. |
-| [`CONTRIBUTING.md`](CONTRIBUTING.md) | Diretrizes padrão para contribuição, fluxo de desenvolvimento, expectativas para Pull Requests, princípios de qualidade de código e orientações comuns de validação em .NET. |
+| [`CONTRIBUTING.md`](CONTRIBUTING.md) | Diretrizes padrão para contribuição, fluxo de desenvolvimento, expectativas para Pull Requests, princípios de qualidade e orientações opcionais de validação por stack. |
+| [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md) | Política bilíngue padrão de conduta para participação respeitosa e tecnicamente construtiva. |
+| [`SUPPORT.md`](SUPPORT.md) | Orientação bilíngue de suporte que separa ajuda pública do projeto de reporte privado de segurança. |
 | [`SECURITY.md`](SECURITY.md) | Política padrão de segurança, reporte responsável de vulnerabilidades, expectativas de divulgação e escopo. |
+| [`.github/ISSUE_TEMPLATE/`](.github/ISSUE_TEMPLATE/) | Formulários genéricos de bug e funcionalidade, além da configuração de criação de issues, próprios para herança por repositórios consumidores. |
+| [`.github/PULL_REQUEST_TEMPLATE.md`](.github/PULL_REQUEST_TEMPLATE.md) | Template bilíngue e genérico de Pull Request com resumo, motivação, validação, compatibilidade/risco e higiene de revisão. |
 | [`.github/FUNDING.yml`](.github/FUNDING.yml) | Configuração do GitHub Sponsors. |
 | [`.github/workflows/dotnet-sdk-sync.yml`](.github/workflows/dotnet-sdk-sync.yml) | Automação central que verifica arquivos `global.json` na raiz dos repositórios e abre Pull Requests de atualização do SDK quando aplicável. |
 | [`.github/workflows/dotnet-repository-inventory.yml`](.github/workflows/dotnet-repository-inventory.yml) | Automação central somente leitura que inventaria projetos .NET nos repositórios acessíveis à GitHub App configurada. |
@@ -44,6 +48,8 @@ O GitHub permite definir arquivos padrão de comunidade através de um repositó
 Quando um dos meus repositórios públicos não possui sua própria versão de um arquivo de comunidade suportado, o GitHub pode utilizar o arquivo correspondente deste repositório.
 
 A versão local de um arquivo continua sendo a referência para aquele projeto. Assim, os padrões compartilhados convivem com requisitos específicos de cada repositório.
+
+A base herdável de comunidade agora inclui formulários de bug e funcionalidade, template de Pull Request, orientação de suporte, código de conduta, guia de contribuição e política de segurança. Os templates de issue/PR evitam requisitos de linguagem ou framework para poderem ser herdados com segurança por repositórios de outras stacks.
 
 Exemplos de regras que podem ser sobrescritas localmente:
 
@@ -259,7 +265,12 @@ Consulte [`docs/agent-governance.pt-BR.md`](docs/agent-governance.pt-BR.md) para
 .
 ├── .gitattributes
 ├── .github/
+│   ├── ISSUE_TEMPLATE/
+│   │   ├── bug_report.yml
+│   │   ├── config.yml
+│   │   └── feature_request.yml
 │   ├── FUNDING.yml
+│   ├── PULL_REQUEST_TEMPLATE.md
 │   ├── dependabot.yml
 │   └── workflows/
 │       ├── agent-governance-validation.yml
@@ -283,8 +294,10 @@ Consulte [`docs/agent-governance.pt-BR.md`](docs/agent-governance.pt-BR.md) para
 │   ├── reusable-workflow-versioning.pt-BR.md
 │   ├── secret-scanning.md
 │   └── secret-scanning.pt-BR.md
+├── CODE_OF_CONDUCT.md
 ├── CONTRIBUTING.md
 ├── SECURITY.md
+├── SUPPORT.md
 ├── README.md
 └── README.pt-BR.md
 ```

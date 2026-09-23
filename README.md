@@ -7,13 +7,13 @@
 [![Sync upstream agent skills](https://github.com/rodri-oliveira-dev/.github/actions/workflows/sync-agent-skills.yml/badge.svg)](https://github.com/rodri-oliveira-dev/.github/actions/workflows/sync-agent-skills.yml)
 [![Distribute managed agent skills](https://github.com/rodri-oliveira-dev/.github/actions/workflows/distribute-agent-skills.yml/badge.svg)](https://github.com/rodri-oliveira-dev/.github/actions/workflows/distribute-agent-skills.yml)
 
-Central repository for shared community standards and maintenance automation across repositories maintained under the `rodri-oliveira-dev` account.
+Shared community-health defaults and a governance/automation control plane for repositories maintained under the `rodri-oliveira-dev` account.
 
 > 🇧🇷 [Leia em Português](README.pt-BR.md)
 
 ## Purpose
 
-This repository provides a consistent baseline for contribution, security, funding, selected repository-maintenance policies, and agent governance without duplicating the same configuration across multiple projects.
+This repository provides a consistent baseline for contribution, security, support, conduct, issue/PR intake, funding, repository-maintenance policies, and agent governance without duplicating the same configuration across multiple projects.
 
 Repository-specific files always take precedence when a project needs different rules, workflows, compatibility requirements, support policies, or local agent instructions.
 
@@ -24,8 +24,12 @@ Repository-specific files always take precedence when a project needs different 
 | [`.gitattributes`](.gitattributes) | Repository-local line-ending and diff normalization for documentation, JSON, and GitHub Actions workflow files. |
 | [`.gitignore`](.gitignore) | Repository-local ignore rules for generated artifacts, temporary validation files, local tool checkouts, and editor/OS files. |
 | [`.github.code-workspace`](.github.code-workspace) | VS Code workspace settings and extension recommendations for consistent Markdown, YAML, and GitHub Actions editing. |
-| [`CONTRIBUTING.md`](CONTRIBUTING.md) | Default contribution guidelines, development workflow, Pull Request expectations, code-quality principles, and common .NET validation guidance. |
+| [`CONTRIBUTING.md`](CONTRIBUTING.md) | Default contribution guidelines, development workflow, Pull Request expectations, code-quality principles, and optional stack-specific validation guidance. |
+| [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md) | Bilingual default conduct policy for respectful, technically constructive project participation. |
+| [`SUPPORT.md`](SUPPORT.md) | Bilingual support guidance that separates public project support from private security reporting. |
 | [`SECURITY.md`](SECURITY.md) | Default security policy, responsible vulnerability reporting, disclosure expectations, and scope. |
+| [`.github/ISSUE_TEMPLATE/`](.github/ISSUE_TEMPLATE/) | Stack-agnostic bug and feature forms plus issue-creation defaults, designed for inheritance by consumer repositories. |
+| [`.github/PULL_REQUEST_TEMPLATE.md`](.github/PULL_REQUEST_TEMPLATE.md) | Generic bilingual Pull Request template covering summary, motivation, validation, compatibility/risk, and review hygiene. |
 | [`.github/FUNDING.yml`](.github/FUNDING.yml) | GitHub Sponsors configuration. |
 | [`.github/dependabot.yml`](.github/dependabot.yml) | Weekly Dependabot updates for SHA-pinned GitHub Actions with review-gated Pull Requests. |
 | [`.github/workflows/dotnet-sdk-sync.yml`](.github/workflows/dotnet-sdk-sync.yml) | Central automation that checks repository-root `global.json` files and opens SDK update Pull Requests when appropriate. |
@@ -45,6 +49,8 @@ GitHub supports default community health files through a public repository named
 When one of my public repositories does not define its own supported community health file, GitHub can use the corresponding default file from this repository.
 
 A repository-local file remains authoritative for that project. This allows shared defaults to coexist with project-specific requirements.
+
+The inherited community baseline now includes bug and feature issue forms, a Pull Request template, support guidance, a code of conduct, contribution guidance, and security policy. The issue/PR templates intentionally avoid language- or framework-specific requirements so repositories from other stacks can inherit them safely.
 
 Examples of repository-specific overrides include:
 
@@ -260,7 +266,12 @@ See [`docs/agent-governance.md`](docs/agent-governance.md) for the composition m
 .
 ├── .gitattributes
 ├── .github/
+│   ├── ISSUE_TEMPLATE/
+│   │   ├── bug_report.yml
+│   │   ├── config.yml
+│   │   └── feature_request.yml
 │   ├── FUNDING.yml
+│   ├── PULL_REQUEST_TEMPLATE.md
 │   ├── dependabot.yml
 │   └── workflows/
 │       ├── agent-governance-validation.yml
@@ -284,8 +295,10 @@ See [`docs/agent-governance.md`](docs/agent-governance.md) for the composition m
 │   ├── reusable-workflow-versioning.pt-BR.md
 │   ├── secret-scanning.md
 │   └── secret-scanning.pt-BR.md
+├── CODE_OF_CONDUCT.md
 ├── CONTRIBUTING.md
 ├── SECURITY.md
+├── SUPPORT.md
 ├── README.md
 └── README.pt-BR.md
 ```

@@ -1,0 +1,70 @@
+name: Bug report
+description: Report a reproducible problem in this repository.
+title: "[Bug]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for taking the time to report a problem.
+        Do not include secrets, credentials, private data, or vulnerability details in a public issue. Use the repository Security policy for security reports.
+
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Pre-flight checks
+      options:
+        - label: I searched existing open and closed issues for the same problem.
+          required: true
+        - label: This report does not contain secrets, credentials, private data, or vulnerability details.
+          required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What happened? Be specific about the observable behavior.
+      placeholder: Describe the problem and its impact.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What did you expect to happen?
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: Provide the smallest reliable sequence of steps, sample, or repository that reproduces the issue.
+      placeholder: |
+        1. ...
+        2. ...
+        3. ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Include only relevant versions, operating system, runtime/tooling, hosting platform, or configuration.
+      placeholder: |
+        Version:
+        OS:
+        Runtime/tooling:
+        Other relevant details:
+    validations:
+      required: false
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Logs or additional evidence
+      description: Add sanitized logs, screenshots, stack traces, or other context. Remove secrets and personal/private data first.
+      render: shell
+    validations:
+      required: false

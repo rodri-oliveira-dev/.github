@@ -56,6 +56,12 @@ The profile is the distributable contract. Repository-local instructions may ext
 
 The upstream and consumer workflows validate the manifest and derive their actual file mappings through `.github/scripts/agent-governance-manifest.sh` using `jq`. An invalid schema, version, source, target or ownership policy blocks mutation. The distributor's broad push path filter wakes it for canonical skill changes, but **only** entries with `distribution.mode: pull-request-existing` are processed; manual artifacts never become automatically managed by triggering the workflow. Run `bash .github/scripts/test-agent-governance-manifest.sh` locally to validate the catalog, mappings and negative fixtures. Future additions/ownership changes require a reviewed update to the manifest and canonical source files. Contract-version enforcement is applied to every Pull Request by `Validate governance source`.
 
+### Semantic governance validation
+
+The required `Validate governance source` check and both automation preflights validate the canonical manifest and parse each skill's YAML frontmatter and the profile YAML as data. The validator enforces metadata/schema, names and source/target paths, duplicate names/sources/targets, ownership and distribution policies, version/profile references, deterministic build commands, and exact catalog-to-disk coverage. Skill cardinality comes from the manifest rather than a hard-coded number. Equivalent YAML quoting or changes to incidental prose do not fail semantic validation; concrete build commands remain an explicit contract.
+
+To run the offline checks locally, use `bash .github/scripts/test-agent-governance-manifest.sh`, `ruby .github/scripts/validate-agent-governance.rb`, and `ruby .github/scripts/test-agent-governance-semantic.rb`. The YAML parser uses the Ruby/Psych standard library, does not evaluate YAML classes or aliases, rejects duplicate keys, and does not fetch remote data.
+
 ## Versioning
 
 `VERSION` is the governance contract version. Use semantic versioning:

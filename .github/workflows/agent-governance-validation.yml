@@ -61,6 +61,7 @@ jobs:
           set -Eeuo pipefail
           ruby -c .github/scripts/test-dependabot-actions.rb
           ruby .github/scripts/test-dependabot-actions.rb --self-test
+          ruby .github/scripts/test-dependabot-actions.rb
 
       - name: Validate governance version gate
         shell: bash

@@ -36,8 +36,13 @@ if ! jq -e --arg v "$current_version" '.governance_version == $v' "$manifest_fil
   echo "::error title=Governance version mismatch::Manifest governance_version differs from VERSION." >&2
   exit 1
 fi
-if [[ "$(sed -n 's/^governance_version:[[:space:]]*\([^#[:space:]]*\)[[:space:]]*$/\1/p' "$profile_file" | wc -l)" -ne 1 ]] ||
-  ! grep -Fxq "governance_version: $current_version" "$profile_file"; then
+# Profile fields are YAML data, not mandatory literal formatting.
+# The catalog validator additionally checks uniqueness, schema and references.
+if ! ruby -rpsych -e '
+  data = Psych.safe_load(File.read(ARGV.fetch(0)), permitted_classes: [],
+                         permitted_symbols: [], aliases: false)
+  exit(data.is_a?(Hash) && data["governance_version"] == ARGV.fetch(1) ? 0 : 1)
+' "$profile_file" "$current_version"; then
   echo "::error title=Governance version mismatch::Profile governance_version differs from VERSION." >&2
   exit 1
 fi
@@ -66,8 +71,36 @@ while IFS= read -r -d '' path; do
         contract_changed=true
         contract_paths+=("$path")
       else
-        sed -E 's/^(governance_version:)[[:space:]]*[0-9]+\.[0-9]+\.[0-9]+[[:space:]]*$/\1 __VERSION__/' "$scratch/base-profile.yml" > "$scratch/base-profile.normalized"
-        sed -E 's/^(governance_version:)[[:space:]]*[0-9]+\.[0-9]+\.[0-9]+[[:space:]]*$/\1 __VERSION__/' "$profile_file" > "$scratch/current-profile.normalized"
+        # Compare the effective YAML mappings, ignoring only the derived version;
+        # comments, quoting and field order are not contract changes.
+        profile_to_json() {
+          ruby -rjson -rpsych -e '
+            data = Psych.safe_load(File.read(ARGV.fetch(0)), permitted_classes: [],
+                                   permitted_symbols: [], aliases: false)
+            abort "Invalid governance profile YAML" unless data.is_a?(Hash)
+            data.delete("governance_version")
+            # Canonicalize every mapping, including mappings nested in arrays.
+            # Preserve array ordering and scalar types: those are contractual.
+            canonicalize = lambda do |value|
+              case value
+              when Hash
+                value.sort_by { |key, _| key.to_s }
+                     .to_h { |key, item| [key, canonicalize.call(item)] }
+              when Array
+                value.map { |item| canonicalize.call(item) }
+              else
+                value
+              end
+            end
+            puts JSON.generate(canonicalize.call(data))
+          ' "$1"
+        }
+        if ! profile_to_json "$scratch/base-profile.yml" > "$scratch/base-profile.normalized" ||
+          ! profile_to_json "$profile_file" > "$scratch/current-profile.normalized"; then
+          contract_changed=true
+          contract_paths+=("$path")
+          continue
+        fi
         if ! cmp -s "$scratch/base-profile.normalized" "$scratch/current-profile.normalized"; then
           contract_changed=true
           contract_paths+=("$path")

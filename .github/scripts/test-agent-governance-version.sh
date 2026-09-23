@@ -13,7 +13,7 @@ git -C "$repo" config user.email fixture@example.invalid
 mkdir -p "$repo/agent-governance/profiles/dotnet-library" "$repo/agent-governance/skills/dotnet/example" "$repo/docs"
 printf '1.1.0\n' > "$repo/agent-governance/VERSION"
 printf '{"schema_version":1,"governance_version":"1.1.0","skills":[{"name":"example"}]}\n' > "$repo/agent-governance/manifest.json"
-printf 'profile: dotnet-library\ngovernance_version: 1.1.0\nstatus: active\n' > "$repo/agent-governance/profiles/dotnet-library/profile.yml"
+printf 'profile: dotnet-library\ngovernance_version: 1.1.0\nstatus: active\nmetadata:\n  groups:\n    - settings:\n        first: true\n        second: false\n' > "$repo/agent-governance/profiles/dotnet-library/profile.yml"
 printf '%s\n' '---' 'name: example' '---' 'Initial instruction.' > "$repo/agent-governance/skills/dotnet/example/SKILL.md"
 printf 'Registry documentation.\n' > "$repo/agent-governance/README.md"
 printf 'Project documentation.\n' > "$repo/docs/guide.md"
@@ -77,6 +77,22 @@ reset_fixture
 jq '.skills[0].name = "changed"' "$repo/agent-governance/manifest.json" > "$tmp/manifest.new"
 mv "$tmp/manifest.new" "$repo/agent-governance/manifest.json"
 assert_gate manifest-contract-without-bump failure 'contract changed without bump'
+reset_fixture
+sed -i 's/profile: dotnet-library/profile: "dotnet-library"/' "$repo/agent-governance/profiles/dotnet-library/profile.yml"
+printf '# Formatting-only comment.\n' >> "$repo/agent-governance/profiles/dotnet-library/profile.yml"
+assert_gate profile-yaml-formatting-only success 'no bump required'
+reset_fixture
+ruby -e '
+  path = ARGV.fetch(0)
+  source = File.read(path)
+  previous = "        first: true\n        second: false\n"
+  abort "Missing nested fixture mapping" unless source.include?(previous)
+  File.write(path, source.sub(previous, "        second: false\n        first: true\n"))
+' "$repo/agent-governance/profiles/dotnet-library/profile.yml"
+assert_gate nested-profile-yaml-key-order-only success 'no bump required'
+reset_fixture
+sed -i 's/        second: false/        second: true/' "$repo/agent-governance/profiles/dotnet-library/profile.yml"
+assert_gate nested-profile-yaml-value-changed failure 'contract changed without bump'
 reset_fixture
 sed -i 's/^status: active/status: paused/' "$repo/agent-governance/profiles/dotnet-library/profile.yml"
 assert_gate profile-contract-without-bump failure 'contract changed without bump'

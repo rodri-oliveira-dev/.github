@@ -23,6 +23,8 @@ on:
       - ".github/scripts/test-inventory-timeout.sh"
       - ".github/scripts/automation/**"
       - ".github/scripts/test-automation-extraction.sh"
+      - ".github/dependabot.yml"
+      - ".github/scripts/test-dependabot-actions.rb"
       - ".github/workflows/agent-governance-validation.yml"
       - ".github/workflows/reusable-secret-scan.yml"
       - ".github/workflows/control-plane-secret-scan.yml"
@@ -52,6 +54,13 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0
+
+      - name: Validate Dependabot configuration and immutable Action pins
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ruby -c .github/scripts/test-dependabot-actions.rb
+          ruby .github/scripts/test-dependabot-actions.rb --self-test
 
       - name: Validate governance version gate
         shell: bash

@@ -1,0 +1,21 @@
+# Dependabot proposes dependency updates; it does not approve or merge them.
+# Critical credential-bearing actions and major upgrades remain separate PRs.
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "tuesday"
+      time: "10:00"
+      timezone: "America/Sao_Paulo"
+    open-pull-requests-limit: 5
+    groups:
+      artifact-io:
+        applies-to: "version-updates"
+        patterns:
+          - "actions/upload-artifact"
+          - "actions/download-artifact"
+        update-types:
+          - "minor"
+          - "patch"

@@ -72,6 +72,16 @@ Branches reservadas de automação usam um contrato explícito de provenance em 
 
 Os workflows de manutenção são camadas finas de orquestração. Os componentes Bash versionados, as fronteiras de confiança preservadas e as suítes de regressão offline estão documentados em [componentes de automação e validação local](docs/automation-components.md).
 
+## Manutenção das dependências de GitHub Actions
+
+O [Dependabot](.github/dependabot.yml) verifica as Actions usadas neste control plane **toda terça-feira às 10h (America/Sao_Paulo)**. Ele propõe Pull Requests de atualização para a `main`, sujeitos a revisão humana. Esta configuração vale apenas para este repositório: **não** é herdada automaticamente pelos demais repositórios como um arquivo de community health. Não são necessárias novas credenciais de GitHub App, permissões elevadas ou configuração de auto-merge.
+
+Mantenha todas as referências `uses:` remotas fixadas por **SHA completo de 40 caracteres** e preserve, quando disponível, o comentário na mesma linha com a versão legível da Action. Apenas atualizações minor/patch de `actions/upload-artifact` e `actions/download-artifact` são agrupadas para validação conjunta. Atualizações major e Actions que recebem credenciais, como `actions/create-github-app-token`, permanecem em PRs separados.
+
+Antes do merge de um PR do Dependabot, confira as notas de release e a correspondência entre tag e commit; examine alterações de permissões e do código executado com secrets; confirme que os `uses:` continuam apontando para SHAs imutáveis, com comentários de versão coerentes; execute os checks existentes de governança, privacidade e secret scanning. Mudanças nos pins de reusable workflows ou Actions do próprio control plane que fazem parte de contratos explícitos exigem atualização coordenada das validações: não contorne esses controles. Preserve revisão humana e as regras de proteção de merge; não habilite auto-merge para PRs do bot.
+
+Depois de integrar a configuração à `main`, consulte **Insights → Dependency graph → Dependabot** para conferir a última verificação do GitHub. A abertura do primeiro PR automático e o estado das configurações do serviço não podem ser comprovados apenas com este PR de configuração.
+
 ## Automações centrais de .NET
 
 O [manifesto canônico de agent governance](agent-governance/manifest.json) define as nove skills e a política de ownership/distribuição por artefato. Quatro skills mantidas no upstream são sincronizadas e oferecidas a consumidores existentes por Pull Request revisado; as outras cinco e as instruções do perfil permanecem manuais. A [documentação de agent governance](agent-governance/README.md) descreve o schema e a validação local.
@@ -241,6 +251,7 @@ Consulte [`docs/agent-governance.pt-BR.md`](docs/agent-governance.pt-BR.md) para
 ├── .gitattributes
 ├── .github/
 │   ├── FUNDING.yml
+│   ├── dependabot.yml
 │   └── workflows/
 │       ├── agent-governance-validation.yml
 │       ├── distribute-agent-skills.yml

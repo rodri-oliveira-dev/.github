@@ -27,6 +27,7 @@ Repository-specific files always take precedence when a project needs different 
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | Default contribution guidelines, development workflow, Pull Request expectations, code-quality principles, and common .NET validation guidance. |
 | [`SECURITY.md`](SECURITY.md) | Default security policy, responsible vulnerability reporting, disclosure expectations, and scope. |
 | [`.github/FUNDING.yml`](.github/FUNDING.yml) | GitHub Sponsors configuration. |
+| [`.github/dependabot.yml`](.github/dependabot.yml) | Weekly Dependabot updates for SHA-pinned GitHub Actions with review-gated Pull Requests. |
 | [`.github/workflows/dotnet-sdk-sync.yml`](.github/workflows/dotnet-sdk-sync.yml) | Central automation that checks repository-root `global.json` files and opens SDK update Pull Requests when appropriate. |
 | [`.github/workflows/dotnet-repository-inventory.yml`](.github/workflows/dotnet-repository-inventory.yml) | Central read-only automation that inventories .NET projects across repositories accessible to the configured GitHub App. |
 | [`.github/workflows/reusable-secret-scan.yml`](.github/workflows/reusable-secret-scan.yml) | Reusable, language-agnostic Git-history secret scanning policy for .NET and future stacks such as Node.js, React, Java, Python, Go, Terraform, Kubernetes, and Docker. |
@@ -71,6 +72,16 @@ Reserved automation branches use an explicit provenance contract rather than tru
 ## Automation implementation and local tests
 
 The maintenance workflows are thin orchestration layers. Their versioned Bash components, preserved trust boundaries, and offline regression suites are documented in [automation components and local validation](docs/automation-components.md).
+
+## GitHub Actions dependency maintenance
+
+[Dependabot](.github/dependabot.yml) checks the GitHub Actions used by this control plane **every Tuesday at 10:00 (America/Sao_Paulo)**. It opens version-update Pull Requests against `main` for review; this is repository-local configuration, **not** an inherited community-health default for other repositories. No GitHub App credentials, new permissions or auto-merge configuration are needed.
+
+Keep all remote `uses:` references pinned to a **full 40-character commit SHA** and retain the corresponding human-readable release tag in the inline comment, where available. The only grouped updates are minor/patch changes to `actions/upload-artifact` and `actions/download-artifact`, which should be tested together. Major upgrades and credential-bearing actions such as `actions/create-github-app-token` remain separate for focused review.
+
+Before merging a Dependabot PR, check the upstream release notes and the actual commit/tag mapping; review permission changes and the code executed with secrets; confirm that all affected `uses:` references still use immutable SHAs and that version comments match; run the existing governance, privacy and secret-scanning checks. For repository-owned reusable workflows or actions whose SHA is explicitly part of a governance contract, coordinate any pin change with its contract validations rather than bypassing those checks. Keep human approval and merge protection in place; do not auto-merge bot PRs.
+
+After this configuration reaches `main`, use **Insights → Dependency graph → Dependabot** to check when GitHub last scanned for updates. The first bot PR and access to its settings cannot be demonstrated solely by opening this configuration PR.
 
 ## Central .NET automations
 
@@ -241,6 +252,7 @@ See [`docs/agent-governance.md`](docs/agent-governance.md) for the composition m
 ├── .gitattributes
 ├── .github/
 │   ├── FUNDING.yml
+│   ├── dependabot.yml
 │   └── workflows/
 │       ├── agent-governance-validation.yml
 │       ├── distribute-agent-skills.yml

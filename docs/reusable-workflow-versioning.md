@@ -44,10 +44,16 @@ unrelated later merge cannot silently change the release contents.
 
 **Required branch-protection prerequisite:** the active `main-hardened` ruleset
 must require at least **one approving review** for Pull Requests and must have
-**no bypass actors**. Publication fails closed if that configuration is absent,
-or if the merged `VERSION` Pull Request lacks a non-author approval of its final
-head commit. The GitHub repository setting must be updated before merging the
-bootstrap PR; changing a file in this repository does not apply a ruleset.
+**no bypass actors**; maintainers must verify the full bypass list in GitHub's
+ruleset settings before merging. The release job checks that its own
+`GITHUB_TOKEN` reports `current_user_can_bypass: never`, rejects any nonempty
+bypass list *when the API returns it*, and requires a non-author approval of
+the final head commit of the merged `VERSION` Pull Request. GitHub may omit
+`bypass_actors` for the job token, so a missing field is never treated as
+proof that the ruleset has no bypass actors. Publication fails closed when it
+cannot verify the release token's no-bypass status, the approving-review
+requirement, or the approved Pull Request provenance. Changing a repository
+file does not update an active ruleset.
 
 The workflow resolves the version from the reviewed file, validates canonical
 `vMAJOR.MINOR.PATCH` format, repository, branch and full 40-character commit

@@ -72,6 +72,10 @@ Branches reservadas de automação usam um contrato explícito de provenance em 
 
 Os workflows de manutenção são camadas finas de orquestração. Os componentes Bash versionados, as fronteiras de confiança preservadas e as suítes de regressão offline estão documentados em [componentes de automação e validação local](docs/automation-components.md).
 
+## Quality gate de workflows e scripts Bash
+
+O workflow [Workflow and shell quality](.github/workflows/workflow-shell-quality.yml) valida todos os Pull Requests com actionlint e ShellCheck, sem filtro de caminhos no evento de PR. O check `Validate workflows and shell` pode ser adicionado aos checks obrigatórios do ruleset `main-hardened` após sua primeira execução. Consulte a [documentação do quality gate e validação local](docs/workflow-quality-gate.md) para os comandos reproduzíveis e as etapas de ativação no ruleset.
+
 ## Manutenção das dependências de GitHub Actions
 
 O [Dependabot](.github/dependabot.yml) verifica as Actions usadas neste control plane **toda terça-feira às 10h (America/Sao_Paulo)**. Ele propõe Pull Requests de atualização para a `main`, sujeitos a revisão humana. Esta configuração vale apenas para este repositório: **não** é herdada automaticamente pelos demais repositórios como um arquivo de community health. Não são necessárias novas credenciais de GitHub App, permissões elevadas ou configuração de auto-merge.

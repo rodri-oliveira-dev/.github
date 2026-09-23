@@ -32,44 +32,32 @@ The reviewed release version is stored in
 The initial value is **`v1.0.0`**. Consumers must wait until the release and
 `v1` alias are visible before adopting the examples below.
 
-A release is **merge-driven and review-gated**: changing `VERSION` requires a
-Pull Request. Only after that reviewed change reaches `main` does
+Changing `VERSION` requires a Pull Request, but publication is intentionally
+**manual and explicit**. After the reviewed version reaches `main`, a
+maintainer runs
 [Publish reusable workflow release](../.github/workflows/reusable-workflow-release.yml)
-run with `contents: write`. The workflow never runs on `pull_request`.
-Its `push` trigger is restricted to `main` and to the `VERSION` path, so
-ordinary merges do not publish releases. `workflow_dispatch` remains
-available for retry/recovery. Both automatic publication and manual retry
-resolve the target to the last `main` commit that changed `VERSION`, so an
-unrelated later merge cannot silently change the release contents.
+with `workflow_dispatch` and enters the same `vMAJOR.MINOR.PATCH` value.
+The workflow never runs on `pull_request`, `pull_request_target`, `push`,
+or `schedule`, so merging a version bump cannot automatically obtain
+`contents: write`.
 
-**Required branch-protection prerequisite:** the active `main-hardened` ruleset
-must require at least **one approving review** for Pull Requests and must have
-**no bypass actors**; maintainers must verify the full bypass list in GitHub's
-ruleset settings before merging. The release job checks that its own
-`GITHUB_TOKEN` reports `current_user_can_bypass: never`, rejects any nonempty
-bypass list *when the API returns it*, and requires a non-author approval of
-the final head commit of the merged `VERSION` Pull Request. GitHub may omit
-`bypass_actors` for the job token, so a missing field is never treated as
-proof that the ruleset has no bypass actors. Publication fails closed when it
-cannot verify the release token's no-bypass status, the approving-review
-requirement, or the approved Pull Request provenance. Changing a repository
-file does not update an active ruleset.
-
-The workflow resolves the version from the reviewed file, validates canonical
-`vMAJOR.MINOR.PATCH` format, repository, branch and full 40-character commit
-SHA, creates the immutable tag and GitHub Release, then advances the matching
-major alias. It refuses to retarget an existing version tag, rejects SemVer
-regression within a major, and will not move a major alias to a non-descendant
-commit. Rerunning the same version at the same commit is idempotent. If the
-release is published but alias promotion fails, resolve that failure before
-recommending `@v1`; consumers may still use a verified exact tag/SHA.
+The manual job checks that the requested version exactly matches
+`.github/reusable-workflows/VERSION`, validates the repository, `main` ref
+and full 40-character target SHA, creates the immutable tag and GitHub Release,
+then advances the matching major alias. It refuses to retarget an existing
+version tag, rejects SemVer regression within a major, and will not move a
+major alias to a non-descendant commit. Re-running the same version while
+`main` still points to the same commit is idempotent. If publication partially
+succeeds, retry before advancing `main`; immutable-tag checks fail closed
+instead of silently moving a published version.
 
 For a compatible release, bump `VERSION` in a reviewed PR (for example,
-`v1.0.1`) and merge it to `main`; never move `v1.0.0`. Breaking changes
-require a new major (for example, `v2.0.0`) with documented migration steps,
-preserving the preceding major line for consumers that have not migrated.
-The major alias changes only through this privileged release workflow, never
-by renaming a branch or by automerging dependency PRs.
+`v1.0.1`), merge it to `main`, and explicitly run the release workflow with
+that version; never move `v1.0.0`. Breaking changes require a new major (for
+example, `v2.0.0`) with documented migration steps, preserving the preceding
+major line for consumers that have not migrated. The major alias changes only
+through this privileged manual workflow, never by renaming a branch or by
+automerge of dependency PRs.
 
 ## Consumer example
 

@@ -25,7 +25,7 @@ export MOCK_PRS="$fixtures/pulls.json"
 export MOCK_CALLS="$fixtures/calls"
 
 cat > "$MOCK_RULESET" <<'JSON'
-{"name":"main-hardened","source":"rodri-oliveira-dev/.github","target":"branch","enforcement":"active","conditions":{"ref_name":{"include":["~DEFAULT_BRANCH"],"exclude":[]}},"bypass_actors":[],"rules":[{"type":"pull_request","parameters":{"required_approving_review_count":1}}]}
+{"name":"main-hardened","source":"rodri-oliveira-dev/.github","target":"branch","enforcement":"active","conditions":{"ref_name":{"include":["~DEFAULT_BRANCH"],"exclude":[]}},"bypass_actors":[],"current_user_can_bypass":"never","rules":[{"type":"pull_request","parameters":{"required_approving_review_count":1}}]}
 JSON
 cat > "$MOCK_PRS" <<'JSON'
 [{"number":59,"merged_at":"2026-09-23T12:00:00Z","base":{"ref":"main"}}]
@@ -81,15 +81,28 @@ reject_guard() {
 run_guard
 grep -Fq 'approved in PR #59' "$fixtures/stdout"
 
-jq '.rules[0].parameters.required_approving_review_count = 0' "$MOCK_RULESET" > "$fixtures/weak.json"
 cp "$MOCK_RULESET" "$fixtures/strong.json"
-cp "$fixtures/weak.json" "$MOCK_RULESET"
-reject_guard "zero required approving reviews" "must require at least one approving review"
+# A GITHUB_TOKEN without ruleset-write access sees no bypass_actors field.
+# The missing list is not an empty list: the release principal must still
+# explicitly report that it cannot bypass the active ruleset.
+jq 'del(.bypass_actors)' "$fixtures/strong.json" > "$MOCK_RULESET"
+run_guard
+grep -Fq 'approved in PR #59' "$fixtures/stdout"
+
+jq 'del(.bypass_actors, .current_user_can_bypass)' "$fixtures/strong.json" > "$MOCK_RULESET"
+reject_guard "omitted bypass list without proof of token restrictions" "the release token must not bypass it"
+jq 'del(.bypass_actors) | .current_user_can_bypass = "always"' "$fixtures/strong.json" > "$MOCK_RULESET"
+reject_guard "hidden bypass list with privileged release token" "the release token must not bypass it"
+jq '.current_user_can_bypass = "always"' "$fixtures/strong.json" > "$MOCK_RULESET"
+reject_guard "privileged release token with visible empty bypass list" "the release token must not bypass it"
 cp "$fixtures/strong.json" "$MOCK_RULESET"
 
-jq '.bypass_actors = [{"actor_id":123,"actor_type":"Team","bypass_mode":"always"}]' "$MOCK_RULESET" > "$fixtures/bypass.json"
-cp "$fixtures/bypass.json" "$MOCK_RULESET"
-reject_guard "ruleset with bypass actors" "must require at least one approving review"
+jq '.rules[0].parameters.required_approving_review_count = 0' "$fixtures/strong.json" > "$MOCK_RULESET"
+reject_guard "zero required approving reviews" "must require an approving review"
+cp "$fixtures/strong.json" "$MOCK_RULESET"
+
+jq '.bypass_actors = [{"actor_id":123,"actor_type":"Team","bypass_mode":"always"}]' "$fixtures/strong.json" > "$MOCK_RULESET"
+reject_guard "ruleset with visible bypass actors" "any visible bypass list must be empty"
 cp "$fixtures/strong.json" "$MOCK_RULESET"
 
 MOCK_RULESET_API_ERROR=true reject_guard "ruleset API failure" "Cannot verify the main-hardened ruleset"

@@ -93,9 +93,10 @@ separate reviewed PR and the existing governance tests.
 
 1. Review the release notes and any input/output, runtime or secret/
    permission changes. Bump `.github/reusable-workflows/VERSION` in a
-   reviewed PR, merge it to `main`, then verify the candidate release and
-   its matching major alias (for example, `v2` for `v2.0.0`) point to that
-   approved commit and wait for the release job to succeed.
+   reviewed PR, merge it to `main`, manually run the release workflow with
+   that exact version, then verify the candidate release and its matching
+   major alias (for example, `v2` for `v2.0.0`) point to the published
+   `main` commit and wait for the release job to succeed.
 2. A consumer on `@v1` automatically follows compatible promotions; a
    consumer on `@v1.0.0` or a SHA must explicitly change its caller in a
    reviewed PR and rerun secret scanning and repository-specific CI.

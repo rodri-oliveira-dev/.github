@@ -26,6 +26,7 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: write
+      pull-requests: read
     steps:
       - name: Checkout reviewed main revision
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -74,6 +75,16 @@ jobs:
           set -Eeuo pipefail
           bash -n .github/scripts/release-reusable-workflows.sh
           bash .github/scripts/release-reusable-workflows.sh --validate
+
+      - name: Verify mandatory review and approved release provenance
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TARGET_SHA: ${{ steps.version.outputs.target_sha }}
+        run: |
+          set -Eeuo pipefail
+          bash -n .github/scripts/validate-reusable-workflow-release-approval.sh
+          bash .github/scripts/validate-reusable-workflow-release-approval.sh
 
       - name: Create immutable release and promote major alias
         shell: bash

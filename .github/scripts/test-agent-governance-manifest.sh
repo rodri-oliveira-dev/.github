@@ -81,7 +81,7 @@ if (
   echo "::error title=Canonical mismatch accepted::Renamed SKILL.md passed manifest preflight." >&2
   exit 1
 fi
-grep -Fq 'Skill name mismatch' "$scratch/mismatch-output"
+grep -Fq 'declared skill name differs' "$scratch/mismatch-output"
 grep -Fq "$canonical_skill" "$scratch/mismatch-output"
 
 if agent_governance_mappings unknown "$manifest" >/dev/null 2>&1; then

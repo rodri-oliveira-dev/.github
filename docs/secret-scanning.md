@@ -82,7 +82,7 @@ The caller deliberately has no `pull_request.paths` filter. It therefore publish
 
 The caller grants only `contents: read` and does not use `pull_request_target`. It delegates enforcement to the reusable workflow: a clean scan succeeds, while findings or an untrustworthy scanner/tool execution fail closed.
 
-After the first valid caller execution publishes its final check context, that exact GitHub Actions context must be added to the active `main-hardened` ruleset as a required status check. This is intentionally done only after observing the real context name so the ruleset cannot deadlock on a guessed check name.
+The job publishes the stable **`Protect control plane`** context on every Pull Request and is designed to act as a merge gate. Adding that context as a required status check in the `main-hardened` ruleset will be consolidated in the **final ruleset artifact of roadmap #25**, together with the other required checks. That repository-setting activation is outside the versioned implementation of issue #14; the caller contract is automatically validated by the quality gate to prevent path filters, elevated permissions, mutable references, or loss of fail-closed behavior.
 
 ## Using it from another repository
 

@@ -86,6 +86,13 @@ jobs:
           ruby -c .github/scripts/test-community-health-defaults.rb
           ruby .github/scripts/test-community-health-defaults.rb
 
+      - name: Verify control-plane secret-scan contract
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ruby -c .github/scripts/test-control-plane-secret-scan-contract.rb
+          ruby .github/scripts/test-control-plane-secret-scan-contract.rb
+
       - name: Verify reusable workflow release policy
         shell: bash
         run: |

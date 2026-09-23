@@ -82,7 +82,7 @@ O caller deliberadamente não possui filtro `pull_request.paths`. Assim, seu che
 
 O caller concede apenas `contents: read` e não utiliza `pull_request_target`. O enforcement fica delegado ao workflow reutilizável: um scan limpo conclui com sucesso, enquanto findings ou uma execução não confiável da ferramenta/scanner falham de forma fechada.
 
-Depois que a primeira execução válida do caller publicar o contexto final do check, esse contexto exato do GitHub Actions deve ser adicionado ao ruleset ativo `main-hardened` como status check obrigatório. Essa etapa ocorre somente após observar o nome real do contexto, evitando deadlock do ruleset por um nome de check presumido.
+O job publica o contexto estável **`Protect control plane`** em todo Pull Request e foi projetado para funcionar como merge gate. A inclusão desse contexto como required status check no ruleset `main-hardened` será consolidada no **arquivo final de rulesets do roadmap #25**, junto aos demais checks obrigatórios. Essa ativação de configuração não faz parte da implementação versionada da issue #14; o contrato do caller é validado automaticamente pelo quality gate para evitar filtros de paths, permissões elevadas, referências mutáveis ou perda do comportamento fail-closed.
 
 ## Uso em outro repositório
 

@@ -51,10 +51,10 @@ export PATH="$fixtures/bin:$PATH"
 
 write_tags() {
   : > "$MOCK_TAGS"
-  printf 'v1.9.0\t%s\n' "1111111111111111111111111111111111111111" >> "$MOCK_TAGS"
-  printf 'v1.10.0\t%s\n' "2222222222222222222222222222222222222222" >> "$MOCK_TAGS"
+  printf 'v1.9.0|%s\n' "1111111111111111111111111111111111111111" >> "$MOCK_TAGS"
+  printf 'v1.10.0|%s\n' "2222222222222222222222222222222222222222" >> "$MOCK_TAGS"
   # Must be ignored for the requested major line.
-  printf 'v2.99.0\t%s\n' "4444444444444444444444444444444444444444" >> "$MOCK_TAGS"
+  printf 'v2.99.0|%s\n' "4444444444444444444444444444444444444444" >> "$MOCK_TAGS"
 }
 run_release() {
   : > "$MOCK_CALLS"

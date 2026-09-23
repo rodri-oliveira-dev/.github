@@ -30,6 +30,7 @@ Arquivos específicos de cada repositório sempre têm prioridade quando um proj
 | [`.github/workflows/dotnet-sdk-sync.yml`](.github/workflows/dotnet-sdk-sync.yml) | Automação central que verifica arquivos `global.json` na raiz dos repositórios e abre Pull Requests de atualização do SDK quando aplicável. |
 | [`.github/workflows/dotnet-repository-inventory.yml`](.github/workflows/dotnet-repository-inventory.yml) | Automação central somente leitura que inventaria projetos .NET nos repositórios acessíveis à GitHub App configurada. |
 | [`.github/workflows/reusable-secret-scan.yml`](.github/workflows/reusable-secret-scan.yml) | Política reutilizável e agnóstica de linguagem para análise de secrets no histórico Git, aplicável a .NET e também a stacks futuras como Node.js, React, Java, Python, Go, Terraform, Kubernetes e Docker. |
+| [`.github/workflows/reusable-workflow-release.yml`](.github/workflows/reusable-workflow-release.yml) | Publicação manual de versões revisadas dos workflows reutilizáveis a partir da `main`, com tags SemVer imutáveis e aliases por major. |
 | [`.github/workflows/control-plane-secret-scan.yml`](.github/workflows/control-plane-secret-scan.yml) | Aplica a política reutilizável de secret scanning ao próprio control plane em todo Pull Request, pushes para `main`, auditorias agendadas e execuções manuais. |
 | [`.github/workflows/agent-governance-validation.yml`](.github/workflows/agent-governance-validation.yml) | Validação determinística do registry central de governança, mappings do perfil, skills gerenciadas e contratos de sincronização/distribuição. |
 | [`.github/workflows/sync-agent-skills.yml`](.github/workflows/sync-agent-skills.yml) | Sincronização semanal de quatro skills .NET em allowlist a partir do `dotnet-library-template`, sempre por Pull Request revisável no registry central. |
@@ -75,6 +76,10 @@ Os workflows de manutenção são camadas finas de orquestração. Os componente
 ## Quality gate de workflows e scripts Bash
 
 O workflow [Workflow and shell quality](.github/workflows/workflow-shell-quality.yml) valida todos os Pull Requests com actionlint e ShellCheck, sem filtro de caminhos no evento de PR. O check `Validate workflows and shell` pode ser adicionado aos checks obrigatórios do ruleset `main-hardened` após sua primeira execução. Consulte a [documentação do quality gate e validação local](docs/workflow-quality-gate.md) para os comandos reproduzíveis e as etapas de ativação no ruleset.
+
+## Workflows reutilizáveis versionados
+
+Os workflows reutilizáveis seguem um contrato de release revisada: tags `vMAJOR.MINOR.PATCH` imutáveis, um alias `vMAJOR` deliberadamente móvel para atualizações compatíveis e SHA completo de commit para reprodutibilidade estrita. A primeira release `v1.0.0` e o alias `v1` **devem ser publicados após o merge desta alteração na `main`**; ainda não estão disponíveis para consumo. A [política de versionamento, publicação, atualização e reversão](docs/reusable-workflow-versioning.pt-BR.md) descreve o [workflow de release manual](.github/workflows/reusable-workflow-release.yml), suas permissões limitadas e os exemplos para consumidores. O caller obrigatório de secret scanning do próprio control plane continua fixado por SHA.
 
 ## Manutenção das dependências de GitHub Actions
 

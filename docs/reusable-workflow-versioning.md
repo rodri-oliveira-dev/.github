@@ -27,31 +27,49 @@ reusable workflow behavior does not silently advance agent-governance versions.
 
 ## First release and controlled promotion
 
-**Initial release: `v1.0.0`, published only after this PR merges to `main`
-and all required checks pass.** At the time this policy is proposed,
-`v1.0.0` and `v1` are not yet published; consumers must not adopt their
-examples until the release is visible.
+The reviewed release version is stored in
+[`.github/reusable-workflows/VERSION`](../.github/reusable-workflows/VERSION).
+The initial value is **`v1.0.0`**. Consumers must wait until the release and
+`v1` alias are visible before adopting the examples below.
 
-The maintainer reviews the exact changes, migration notes and compatibility
-for every new release and explicitly triggers
+A release is **merge-driven and review-gated**: changing `VERSION` requires a
+Pull Request. Only after that reviewed change reaches `main` does
 [Publish reusable workflow release](../.github/workflows/reusable-workflow-release.yml)
-on **`main`**, entering the approved `vMAJOR.MINOR.PATCH` value. The
-workflow never runs on `pull_request` or ordinary push. It uses a
-short-lived `GITHUB_TOKEN` with `contents: write` only in the manual
-release job, checks the repository, branch, 40-character commit SHA and
-canonical version, creates the immutable tag and GitHub Release, then
-advances the matching major alias. The release job refuses to retarget an
-existing version tag or move a major alias to a non-descendant commit.
-Rerunning at the same commit/version is idempotent. If publication succeeds
-but alias promotion fails, resolve that failure before recommending
-`@v1`; consumers may still use a verified exact tag/SHA.
+run with `contents: write`. The workflow never runs on `pull_request`.
+Its `push` trigger is restricted to `main` and to the `VERSION` path, so
+ordinary merges do not publish releases. `workflow_dispatch` remains
+available for retry/recovery. Both automatic publication and manual retry
+resolve the target to the last `main` commit that changed `VERSION`, so an
+unrelated later merge cannot silently change the release contents.
 
-Publish a new compatible version from a newly reviewed merge to `main`
-(e.g. `v1.0.1`); never move `v1.0.0`. Publish breaking changes under a
-new major (e.g. `v2.0.0`) with documented migration steps, preserving
-the preceding major line for consumers that have not migrated. The
-major alias is changed only during this explicit release workflow, not by
-renaming a branch or by automerging dependency PRs.
+**Required branch-protection prerequisite:** the active `main-hardened` ruleset
+must require at least **one approving review** for Pull Requests and must have
+**no bypass actors**; maintainers must verify the full bypass list in GitHub's
+ruleset settings before merging. The release job checks that its own
+`GITHUB_TOKEN` reports `current_user_can_bypass: never`, rejects any nonempty
+bypass list *when the API returns it*, and requires a non-author approval of
+the final head commit of the merged `VERSION` Pull Request. GitHub may omit
+`bypass_actors` for the job token, so a missing field is never treated as
+proof that the ruleset has no bypass actors. Publication fails closed when it
+cannot verify the release token's no-bypass status, the approving-review
+requirement, or the approved Pull Request provenance. Changing a repository
+file does not update an active ruleset.
+
+The workflow resolves the version from the reviewed file, validates canonical
+`vMAJOR.MINOR.PATCH` format, repository, branch and full 40-character commit
+SHA, creates the immutable tag and GitHub Release, then advances the matching
+major alias. It refuses to retarget an existing version tag, rejects SemVer
+regression within a major, and will not move a major alias to a non-descendant
+commit. Rerunning the same version at the same commit is idempotent. If the
+release is published but alias promotion fails, resolve that failure before
+recommending `@v1`; consumers may still use a verified exact tag/SHA.
+
+For a compatible release, bump `VERSION` in a reviewed PR (for example,
+`v1.0.1`) and merge it to `main`; never move `v1.0.0`. Breaking changes
+require a new major (for example, `v2.0.0`) with documented migration steps,
+preserving the preceding major line for consumers that have not migrated.
+The major alias changes only through this privileged release workflow, never
+by renaming a branch or by automerging dependency PRs.
 
 ## Consumer example
 
@@ -86,8 +104,10 @@ separate reviewed PR and the existing governance tests.
 ## Updating, rollback and operational checks
 
 1. Review the release notes and any input/output, runtime or secret/
-   permission changes. Check that the candidate release and `v1` point
-   to the approved commit, and wait for the release job to succeed.
+   permission changes. Bump `.github/reusable-workflows/VERSION` in a
+   reviewed PR, merge it to `main`, then verify the candidate release and
+   its matching major alias (for example, `v2` for `v2.0.0`) point to that
+   approved commit and wait for the release job to succeed.
 2. A consumer on `@v1` automatically follows compatible promotions; a
    consumer on `@v1.0.0` or a SHA must explicitly change its caller in a
    reviewed PR and rerun secret scanning and repository-specific CI.

@@ -11,6 +11,9 @@ mkdir -p "$fixtures/bin"
 export MOCK_TAGS="$fixtures/tags"
 export MOCK_CALLS="$fixtures/calls"
 export MOCK_ALIAS_SHA="1111111111111111111111111111111111111111"
+# Keep this suite self-contained when invoked by the parent test, which may
+# export RELEASE_TARGET_SHA for its own validation fixtures.
+unset RELEASE_TARGET_SHA
 export GITHUB_REPOSITORY="rodri-oliveira-dev/.github"
 export GITHUB_REF="refs/heads/main"
 export GH_TOKEN="fake-fixture-token"
@@ -42,6 +45,7 @@ GH
 cat > "$fixtures/bin/git" <<'GIT'
 #!/usr/bin/env bash
 set -Eeuo pipefail
+if [[ "${1:-}" == cat-file && "${2:-}" == -e ]]; then exit 0; fi
 if [[ "$*" == merge-base\ --is-ancestor\ * ]]; then exit 0; fi
 printf 'Unexpected mock git invocation: %s\n' "$*" >&2
 exit 2

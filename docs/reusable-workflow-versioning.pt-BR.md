@@ -45,6 +45,14 @@ publicação automática quanto o retry manual resolvem o target para o último
 commit da `main` que alterou `VERSION`, impedindo que um merge posterior e não
 relacionado mude silenciosamente o conteúdo da release.
 
+**Pré-requisito obrigatório de proteção da branch:** o ruleset ativo
+`main-hardened` deve exigir pelo menos **uma aprovação de review** para Pull
+Requests e não pode ter **atores com bypass**. A publicação falha de forma
+fechada se essa configuração estiver ausente ou se o PR mergeado que alterou
+`VERSION` não tiver uma aprovação de pessoa diferente da autora no último
+commit do PR. O ajuste deve ser aplicado nas configurações do repositório
+antes do merge deste PR; versionar um arquivo não altera o ruleset ativo.
+
 O workflow resolve a versão a partir do arquivo revisado, valida o formato
 canônico `vMAJOR.MINOR.PATCH`, repositório, branch e SHA completo de 40
 caracteres, cria a tag imutável e a GitHub Release e então promove o alias da
@@ -97,8 +105,9 @@ exige PR revisado e aprovação dos testes de governança existentes.
 1. Revise as notas de release e possíveis mudanças de inputs/outputs,
    runtime, secrets ou permissões. Incremente
    `.github/reusable-workflows/VERSION` em PR revisado, faça merge na
-   `main`, confira se a tag da release e `v1` apontam para esse commit
-   aprovado e aguarde a conclusão do workflow.
+   `main`, confira se a tag da release e o alias da major correspondente
+   (por exemplo, `v2` para `v2.0.0`) apontam para esse commit aprovado e
+   aguarde a conclusão do workflow.
 2. O consumidor em `@v1` acompanha promoções compatíveis
    automaticamente; consumidores em `@v1.0.0` ou SHA devem atualizar
    o caller explicitamente em PR revisado e executar secret scanning

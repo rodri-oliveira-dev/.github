@@ -105,10 +105,10 @@ permissions:
 
 jobs:
   secrets:
-    uses: rodri-oliveira-dev/.github/.github/workflows/reusable-secret-scan.yml@main
+    uses: rodri-oliveira-dev/.github/.github/workflows/reusable-secret-scan.yml@v1
 ```
 
-For stronger supply-chain isolation, external consumers or repositories with stricter requirements can replace `@main` with an immutable commit SHA of the central workflow. For repositories maintained by the same account, `@main` allows central policy fixes to propagate without duplicating YAML.
+**Use this example only after the initial release and `v1` alias have been published.** The `@v1` alias advances through reviewed, backward-compatible releases, while `@v1.0.0` pins one release. For maximum isolation, replace it with a **real full commit SHA** verified against the published release. Do not recommend `@main` for consumers. The control plane's own required caller remains pinned by SHA. See the [versioning, update and rollback policy](reusable-workflow-versioning.md).
 
 ## Stack coverage
 

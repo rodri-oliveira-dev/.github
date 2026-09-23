@@ -39,8 +39,9 @@ assert(!events.key?("pull_request_target"), "#{caller_path}: pull_request_target
 
 pull_request = events["pull_request"]
 if pull_request.is_a?(Hash)
-  assert(!pull_request.key?("paths") && !pull_request.key?("paths-ignore"),
-         "#{caller_path}: pull_request must not use path filters because the check is intended to become required.")
+  forbidden_filters = %w[paths paths-ignore branches branches-ignore types] & pull_request.keys
+  assert(forbidden_filters.empty?,
+         "#{caller_path}: pull_request must not use filters that can suppress the required check: #{forbidden_filters.join(', ')}.")
 end
 
 push = events["push"]
@@ -68,6 +69,8 @@ assert(job["name"] == "Protect control plane",
 assert(job["permissions"] == { "contents" => "read" },
        "#{caller_path}: job permissions must be exactly contents: read.")
 assert(!job.key?("secrets"), "#{caller_path}: caller must not inherit or forward repository secrets.")
+assert(!job.key?("if"),
+       "#{caller_path}: secret-scan job must not be conditional; a skipped job can satisfy a required check without scanning.")
 
 uses = job["uses"]
 expected_prefix = "rodri-oliveira-dev/.github/.github/workflows/reusable-secret-scan.yml@"
@@ -93,6 +96,10 @@ assert(scanner_job["name"] == "Scan Git history for secrets",
        "#{reusable_path}: scanner job name changed unexpectedly.")
 assert(scanner_job["timeout-minutes"].is_a?(Integer) && scanner_job["timeout-minutes"] <= 15,
        "#{reusable_path}: scanner job must keep an explicit timeout of at most 15 minutes.")
+assert(!scanner_job.key?("if"),
+       "#{reusable_path}: scanner job must not be conditional; a skipped job can satisfy a required check without scanning.")
+assert(!scanner_job.key?("continue-on-error"),
+       "#{reusable_path}: scanner job must not allow failures to continue.")
 
 steps = scanner_job["steps"]
 assert(steps.is_a?(Array) && !steps.empty?, "#{reusable_path}: scanner steps are missing.")
@@ -103,14 +110,28 @@ assert(!enforce.key?("continue-on-error"),
        "#{reusable_path}: enforcement step must not allow failures to continue.")
 
 run = enforce["run"].to_s
+
+classification_fallback = run.match?(/else\s*\n\s*result="tool-failure"\s*\n\s*fi/)
+assert(classification_fallback,
+       "#{reusable_path}: missing or unknown scan results must map to tool-failure before enforcement.")
+
+case_match = run.match(/case\s+"\$result"\s+in\s*\n(?<body>.*?)^\s*esac\s*$/m)
+assert(case_match, "#{reusable_path}: enforcement must contain a case on $result.")
+
+arms = {}
+case_match[:body].scan(/^\s*([A-Za-z0-9_*-]+)\)\s*\n(.*?)^\s*;;\s*$/m) do |label, commands|
+  exit_codes = commands.scan(/^\s*exit\s+(\d+)\s*$/).flatten
+  arms[label] = exit_codes
+end
+
 {
-  "clean" => "exit 0",
-  "findings" => "exit 1",
-  "coverage-failure" => "exit 3",
-  "tool/default failure" => "exit 2"
-}.each do |result, expected_exit|
-  assert(run.include?(expected_exit),
-         "#{reusable_path}: enforcement contract for #{result} must contain #{expected_exit}.")
+  "clean" => ["0"],
+  "findings" => ["1"],
+  "coverage-failure" => ["3"],
+  "*" => ["2"]
+}.each do |label, expected_codes|
+  assert(arms[label] == expected_codes,
+         "#{reusable_path}: enforcement case '#{label})' must exit exactly #{expected_codes.join(', ')}, found #{arms[label].inspect}.")
 end
 
 puts "Control-plane secret-scan caller is unconditional, least-privilege, SHA-pinned, and fail-closed."

@@ -99,7 +99,7 @@ no_mutation
 RELEASE_VERSION="v1.11.0" GITHUB_SHA="3333333333333333333333333333333333333333" run_release
 grep -Fq 'Published v1.11.0' "$fixtures/stdout"
 grep -Eq -- '^api --method POST .*refs/tags/v1.11.0' "$MOCK_CALLS"
-grep -Eq -- '^api --method PATCH .*refs/tags/v1 ' "$MOCK_CALLS"
+grep -Fq -- "api --method PATCH repos/$GITHUB_REPOSITORY/git/refs/tags/v1 -f sha=$GITHUB_SHA" "$MOCK_CALLS"
 
 # No catalog must never be interpreted as empty when the API fails.
 MOCK_CATALOG_FAILURE=true reject_release "tag enumeration error" "Cannot enumerate existing release tags"

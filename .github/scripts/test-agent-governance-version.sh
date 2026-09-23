@@ -78,6 +78,10 @@ jq '.skills[0].name = "changed"' "$repo/agent-governance/manifest.json" > "$tmp/
 mv "$tmp/manifest.new" "$repo/agent-governance/manifest.json"
 assert_gate manifest-contract-without-bump failure 'contract changed without bump'
 reset_fixture
+sed -i 's/profile: dotnet-library/profile: "dotnet-library"/' "$repo/agent-governance/profiles/dotnet-library/profile.yml"
+printf '# Formatting-only comment.\n' >> "$repo/agent-governance/profiles/dotnet-library/profile.yml"
+assert_gate profile-yaml-formatting-only success 'no bump required'
+reset_fixture
 sed -i 's/^status: active/status: paused/' "$repo/agent-governance/profiles/dotnet-library/profile.yml"
 assert_gate profile-contract-without-bump failure 'contract changed without bump'
 reset_fixture

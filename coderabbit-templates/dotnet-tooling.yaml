@@ -1,0 +1,51 @@
+language: "pt-BR"
+tone_instructions: "Seja técnico, objetivo e acionável. Priorize corretude, determinismo, compatibilidade, falsos positivos, performance e experiência de uso."
+reviews:
+  profile: "assertive"
+  request_changes_workflow: false
+  high_level_summary: true
+  review_status: true
+  review_details: true
+  poem: false
+  auto_review:
+    enabled: true
+    drafts: false
+  path_filters:
+    - "!**/bin/**"
+    - "!**/obj/**"
+    - "!**/TestResults/**"
+    - "!**/coverage/**"
+    - "!**/coverage-report/**"
+  path_instructions:
+    - path: "src/**/*.cs"
+      instructions: |
+        Revise como tooling .NET, CLI ou analyzer.
+        - Verifique determinismo e comportamento reproduzível.
+        - Para Roslyn, avalie falsos positivos/negativos, análise semântica, custo por compilação e casos de sintaxe incompleta.
+        - Para CLI, verifique códigos de saída, stdout/stderr, parsing, compatibilidade de argumentos e mensagens acionáveis.
+        - Avalie CancellationToken, concorrência, IO, descarte de recursos e tratamento de erros.
+        - Identifique mudanças de contrato que possam quebrar pipelines ou consumidores existentes.
+    - path: "**/*Analyzer*.cs"
+      instructions: |
+        Verifique IDs de diagnóstico, severidade, mensagens, localização do diagnóstico,
+        casos limítrofes, generated code e performance da análise.
+    - path: "**/*Tests/**/*.cs"
+      instructions: |
+        Exija testes de casos positivos e negativos, bordas, regressões e comportamento determinístico.
+        Para analyzers, procure testes que validem ausência de diagnóstico e localização precisa.
+    - path: "action.yml"
+      instructions: |
+        Verifique inputs, outputs, defaults, quoting, compatibilidade entre runners,
+        exposição de secrets e estabilidade do contrato da GitHub Action.
+    - path: "**/Dockerfile*"
+      instructions: |
+        Verifique segurança, reprodutibilidade, usuário não root, dependências e tamanho da imagem.
+    - path: ".github/workflows/**"
+      instructions: |
+        Verifique permissões mínimas, supply chain, pinning seguro de actions,
+        secrets, publicação de pacotes/actions e condições de release.
+    - path: "**/*.md"
+      instructions: |
+        Verifique se instalação, comandos, exemplos, diagnósticos e contratos documentados correspondem à implementação.
+chat:
+  auto_reply: true

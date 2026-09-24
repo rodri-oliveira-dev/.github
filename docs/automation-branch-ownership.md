@@ -7,6 +7,7 @@ This control plane reserves a small set of branch names for cross-repository mai
 | .NET SDK synchronization | `chore/sync-dotnet-sdk` | `<!-- automation-branch-owner: dotnet-sdk-sync/v1 -->` |
 | Upstream agent-skill synchronization | `chore/sync-upstream-agent-skills` | `<!-- automation-branch-owner: sync-upstream-agent-skills/v1 -->` |
 | Consumer agent-skill distribution | `chore/sync-agent-governance` | `<!-- automation-branch-owner: distribute-agent-skills/v1 -->` |
+| CodeRabbit configuration distribution | `chore/sync-coderabbit-config` | `<!-- automation-branch-owner: coderabbit-config-sync/v1 -->` |
 
 A reserved name alone is never evidence that a branch belongs to automation.
 
@@ -24,6 +25,8 @@ Before an existing reserved branch can be mutated by automation, the workflow mu
 If the branch and matching Pull Request are both absent, the branch may be created. Git pushes use an explicit empty `--force-with-lease` expectation so a branch created by another actor after the check causes the push to fail rather than being reused.
 
 For the Git-based agent-skill workflows, an existing automation-owned branch is refreshed with the captured remote SHA supplied explicitly to `--force-with-lease`. A concurrent push after the provenance check therefore rejects the automation push.
+
+The CodeRabbit configuration distributor follows the same Git-based exact-head contract. It validates the reserved branch and Pull Request provenance, checks out the captured branch head, and pushes with `--force-with-lease`. A new reserved branch is created only with an explicit empty lease, so a concurrently created branch is never silently reused.
 
 The SDK synchronization uses the same exact-head principle through a temporary checkout of the target repository. It fetches the reserved branch, verifies that the fetched head is still the proven SHA, creates the SDK update commit in that target-repository checkout, and pushes it with `--force-with-lease="refs/heads/<branch>:<proven-sha>"`. The push succeeds only while the remote ref is exactly the SHA that passed provenance verification; a concurrent advance, reset to an ancestor, deletion, or replacement is rejected. An already-open automation PR is refreshed to a newer SDK without deleting or recreating its branch, while a branch that already proposes the current latest SDK is left unchanged.
 

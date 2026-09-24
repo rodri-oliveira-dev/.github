@@ -1,0 +1,48 @@
+language: "pt-BR"
+tone_instructions: "Seja técnico, objetivo e acionável. Priorize defeitos reais, regressões, riscos de compatibilidade, segurança e manutenção."
+reviews:
+  profile: "assertive"
+  request_changes_workflow: false
+  high_level_summary: true
+  review_status: true
+  review_details: true
+  poem: false
+  auto_review:
+    enabled: true
+    drafts: false
+  path_filters:
+    - "!**/bin/**"
+    - "!**/obj/**"
+    - "!**/TestResults/**"
+    - "!**/coverage/**"
+    - "!**/coverage-report/**"
+  path_instructions:
+    - path: "**/*.cs"
+      instructions: |
+        Revise como código de biblioteca .NET reutilizável.
+        - Identifique breaking changes em APIs públicas, contratos, nullability e comportamento observável.
+        - Verifique compatibilidade binária e de origem quando APIs públicas forem alteradas.
+        - Avalie async/await, CancellationToken, concorrência, thread safety e descarte de recursos.
+        - Aponte alocações desnecessárias, hot paths e regressões de performance relevantes.
+        - Verifique tratamento de exceções, validação de argumentos e mensagens de erro.
+        - Prefira observações concretas e demonstráveis a sugestões meramente estilísticas.
+    - path: "**/*Tests/**/*.cs"
+      instructions: |
+        Verifique cobertura de comportamento público, cenários negativos, limites e regressões.
+        Confirme que os testes não dependem de ordem, estado global ou temporização frágil.
+    - path: "**/*.csproj"
+      instructions: |
+        Verifique TargetFrameworks, PackageReference, compatibilidade, empacotamento NuGet,
+        propriedades públicas do pacote e riscos de dependências transitivas.
+    - path: "Directory.*.props"
+      instructions: |
+        Verifique se mudanças de build, analyzers, versões e empacotamento são compatíveis com todos os projetos afetados.
+    - path: ".github/workflows/**"
+      instructions: |
+        Verifique permissões mínimas, exposição de secrets, pinning seguro de actions,
+        supply chain, condições de execução e confiabilidade do pipeline.
+    - path: "**/*.md"
+      instructions: |
+        Verifique se documentação, exemplos e contratos descritos continuam coerentes com a API implementada.
+chat:
+  auto_reply: true

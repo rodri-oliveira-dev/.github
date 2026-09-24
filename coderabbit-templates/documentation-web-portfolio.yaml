@@ -1,0 +1,44 @@
+language: "pt-BR"
+tone_instructions: "Seja objetivo e preciso. Priorize conteúdo incorreto, links quebrados, acessibilidade, SEO, segurança e inconsistências entre idiomas."
+reviews:
+  profile: "chill"
+  request_changes_workflow: false
+  high_level_summary: true
+  review_status: true
+  review_details: true
+  poem: false
+  auto_review:
+    enabled: true
+    drafts: false
+  path_instructions:
+    - path: "**/*.md"
+      instructions: |
+        Verifique clareza, precisão técnica, links, âncoras, exemplos, comandos e consistência terminológica.
+        Quando houver versões em português e inglês, sinalize divergências materiais de conteúdo.
+        Não proponha mudanças puramente estilísticas sem ganho claro.
+    - path: "**/*.html"
+      instructions: |
+        Verifique HTML semântico, acessibilidade, metadados, canonical, Open Graph,
+        links, navegação por teclado e regressões de SEO.
+    - path: "**/*.css"
+      instructions: |
+        Verifique responsividade, contraste, overflow, estados de foco e regressões visuais previsíveis.
+    - path: "**/*.js"
+      instructions: |
+        Verifique erros de execução, manipulação insegura do DOM, URLs externas,
+        acessibilidade e regressões de comportamento.
+    - path: "**/*.py"
+      instructions: |
+        Verifique scripts de automação quanto a determinismo, tratamento de erros,
+        segurança de entrada e alterações não intencionais em conteúdo gerado.
+    - path: ".github/workflows/**"
+      instructions: |
+        Verifique permissões mínimas, supply chain, secrets, publicação e integridade do deploy.
+    - path: "robots.txt"
+      instructions: |
+        Verifique se as regras não bloqueiam conteúdo que deve ser indexado nem expõem caminhos indevidos.
+    - path: "sitemap.xml"
+      instructions: |
+        Verifique URLs inválidas, duplicadas ou inconsistentes com as páginas publicadas.
+chat:
+  auto_reply: true

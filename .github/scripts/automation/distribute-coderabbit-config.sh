@@ -334,7 +334,7 @@ EOF
 
       # If this run created the branch and PR creation failed, clean up only when
       # the remote branch still points to the exact commit produced by this run.
-      if [[ "$created_branch" == "true" && -n "$expected_branch_sha" ]]; then
+      if [[ "$branch_exists" == "false" && -n "$expected_branch_sha" ]]; then
         local live_sha=""
         live_sha="$(gh api "repos/$repo/git/ref/heads/$SYNC_BRANCH" --jq '.object.sha' 2>/dev/null || true)"
         if [[ "$live_sha" == "$expected_branch_sha" ]]; then

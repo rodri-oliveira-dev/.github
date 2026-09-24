@@ -1,0 +1,43 @@
+{
+  "version": 1,
+  "owner": "rodri-oliveira-dev",
+  "description": "Mapeamento de templates CodeRabbit para repositorios proprios e ativos. Forks sao excluidos.",
+  "templates": {
+    "dotnet-library.yaml": [
+      "rodri-oliveira-dev/Dapper-FluentMap",
+      "rodri-oliveira-dev/Dapper.TypedParameters",
+      "rodri-oliveira-dev/ReliableWebhooks",
+      "rodri-oliveira-dev/dotnet-library-template",
+      "rodri-oliveira-dev/brazilian-primitives"
+    ],
+    "dotnet-application.yaml": [
+      "rodri-oliveira-dev/web-api-core-seed",
+      "rodri-oliveira-dev/dotnet-code-coverage",
+      "rodri-oliveira-dev/poc-arquitetura",
+      "rodri-oliveira-dev/dotnet-observability-lab"
+    ],
+    "dotnet-tooling.yaml": [
+      "rodri-oliveira-dev/CSF.Analyzers",
+      "rodri-oliveira-dev/complexity-analyzers",
+      "rodri-oliveira-dev/DotNetRepoInspector",
+      "rodri-oliveira-dev/adr-guard"
+    ],
+    "devops-platform.yaml": [
+      "rodri-oliveira-dev/.github",
+      "rodri-oliveira-dev/dotfiles",
+      "rodri-oliveira-dev/terraform-gcp-dotnet-blueprint"
+    ],
+    "documentation-web-portfolio.yaml": [
+      "rodri-oliveira-dev/rodrigodotnet",
+      "rodri-oliveira-dev/rodri-oliveira-dev",
+      "rodri-oliveira-dev/rodri-oliveira-dev.github.io",
+      "rodri-oliveira-dev/dotnet-copilot-code-review-skills"
+    ]
+  },
+  "ignored": {
+    "forks": "Todos os forks estao fora do rollout atual.",
+    "archived": [
+      "rodri-oliveira-dev/gerador-de-camadas"
+    ]
+  }
+}

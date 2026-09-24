@@ -7,6 +7,7 @@ Este control plane reserva um conjunto pequeno de nomes de branch para manutenç
 | Sincronização do .NET SDK | `chore/sync-dotnet-sdk` | `<!-- automation-branch-owner: dotnet-sdk-sync/v1 -->` |
 | Sincronização de agent skills upstream | `chore/sync-upstream-agent-skills` | `<!-- automation-branch-owner: sync-upstream-agent-skills/v1 -->` |
 | Distribuição de agent skills para consumidores | `chore/sync-agent-governance` | `<!-- automation-branch-owner: distribute-agent-skills/v1 -->` |
+| Distribuição da configuração do CodeRabbit | `chore/sync-coderabbit-config` | `<!-- automation-branch-owner: coderabbit-config-sync/v1 -->` |
 
 O nome reservado, isoladamente, nunca é evidência de que uma branch pertence à automação.
 
@@ -24,6 +25,8 @@ Antes de qualquer mutação automatizada de uma branch reservada existente, o wo
 Se a branch e o Pull Request correspondente estiverem ambos ausentes, a branch pode ser criada. Os pushes usam uma expectativa vazia explícita em `--force-with-lease`, de forma que uma branch criada por outro ator depois da verificação faz o push falhar em vez de reutilizar essa branch.
 
 Nos workflows de agent skills baseados em Git, uma branch comprovadamente controlada pela automação é atualizada passando o SHA remoto capturado explicitamente para `--force-with-lease`. Assim, qualquer push concorrente após a validação de provenance faz o push da automação ser rejeitado.
+
+A distribuição da configuração do CodeRabbit segue o mesmo contrato de exact-head baseado em Git. Ela valida a provenance da branch reservada e do Pull Request, faz checkout do head capturado e envia a alteração com `--force-with-lease`. Uma nova branch reservada só é criada com lease vazio explícito, portanto uma branch criada concorrentemente nunca é reutilizada silenciosamente.
 
 A sincronização do SDK aplica o mesmo princípio de exact-head por meio de um checkout temporário do repositório alvo. O workflow busca a branch reservada, confirma que o head obtido ainda é exatamente o SHA comprovado, cria o commit de atualização do SDK nesse checkout do repositório alvo e faz o push com `--force-with-lease="refs/heads/<branch>:<sha-comprovado>"`. O push só é aceito enquanto o ref remoto permanecer exatamente no SHA validado pela provenance; avanço concorrente, reset para um ancestral, exclusão ou substituição da branch são rejeitados. Um PR de automação já aberto é atualizado para um SDK mais novo sem apagar nem recriar sua branch; se a branch já propõe o SDK mais recente, ela permanece inalterada.
 

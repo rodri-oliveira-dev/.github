@@ -151,8 +151,8 @@ done
 sort -u -o "$existing_ids" "$existing_ids"
 
 search_query='
-query($query: String!, $after: String) {
-  search(query: $query, type: ISSUE, first: 100, after: $after) {
+query($searchQuery: String!, $after: String) {
+  search(query: $searchQuery, type: ISSUE, first: 100, after: $after) {
     issueCount
     nodes {
       ... on Issue {
@@ -173,11 +173,11 @@ total_found=0
 while :; do
   if [[ -n "$cursor" ]]; then
     page="$(
-      gh api graphql         -F query="$ISSUE_SEARCH_QUERY"         -F after="$cursor"         -f query="$search_query"
+      gh api graphql         -F searchQuery="$ISSUE_SEARCH_QUERY"         -F after="$cursor"         -f query="$search_query"
     )"
   else
     page="$(
-      gh api graphql         -F query="$ISSUE_SEARCH_QUERY"         -f query="$search_query"
+      gh api graphql         -F searchQuery="$ISSUE_SEARCH_QUERY"         -f query="$search_query"
     )"
   fi
 

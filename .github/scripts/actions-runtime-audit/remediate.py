@@ -16,6 +16,8 @@ from scanner import API, AuditError, REMOTE
 WF = re.compile(r"\.github/workflows/[^/]+\.ya?ml$")
 LOCAL = re.compile(r"(?:action\.ya?ml|\.github/actions/.+/action\.ya?ml)$")
 LINE = re.compile(r"^(?P<prefix>\s*(?:-\s*)?uses:\s*)(?P<quote>['\"]?)(?P<value>[^'\"\s#]+)(?P=quote)(?P<tail>[ \t]*(?:#.*)?)$")
+AUTOMATION_BRANCH = "automation/actions-node24"
+AUTOMATION_COMMIT_MESSAGE = "ci: migrar Actions legadas para Node.js 24"
 
 
 def mapping(node):
@@ -117,6 +119,23 @@ class Writer:
             raise AuditError("Write-enabled GitHub App token is required")
         self.token = token
 
+    def delete(self, path):
+        if not path.startswith("/") or path.startswith("//"):
+            raise AuditError("Invalid GitHub API path")
+        request = urllib.request.Request(
+            "https://api.github.com" + path,
+            headers={"Authorization": "Bearer " + self.token,
+                     "Accept": "application/vnd.github+json",
+                     "X-GitHub-Api-Version": "2022-11-28",
+                     "User-Agent": "actions-runtime-remediator"}, method="DELETE")
+        try:
+            with urllib.request.urlopen(request, timeout=30):
+                return
+        except urllib.error.HTTPError as error:
+            raise AuditError(f"GitHub delete rejected (HTTP {error.code})") from error
+        except urllib.error.URLError as error:
+            raise AuditError("GitHub write API unavailable") from error
+
     def post(self, path, data):
         if not path.startswith("/") or path.startswith("//"):
             raise AuditError("Invalid GitHub API path")
@@ -135,6 +154,19 @@ class Writer:
             raise AuditError(f"GitHub write rejected (HTTP {error.code})") from error
         except urllib.error.URLError as error:
             raise AuditError("GitHub write API unavailable") from error
+
+
+def automation_branch_is_owned(api, repository, branch_ref):
+    if not isinstance(branch_ref, dict):
+        return False
+    sha = branch_ref.get("object", {}).get("sha")
+    if not isinstance(sha, str):
+        return False
+    commit = api.get(f"/repos/{repository}/git/commits/{sha}")
+    return (isinstance(commit, dict)
+            and commit.get("message") == AUTOMATION_COMMIT_MESSAGE
+            and isinstance(commit.get("parents"), list)
+            and len(commit["parents"]) == 1)
 
 
 def remediate(api, writer, owner, report, policy):
@@ -157,15 +189,12 @@ def remediate(api, writer, owner, report, policy):
             if not branch_name:
                 raise AuditError("Missing default branch")
             base = api.get(f"/repos/{name}/git/ref/heads/{urllib.parse.quote(branch_name, safe='')}")["object"]["sha"]
-            branch = "automation/actions-node24"
+            branch = AUTOMATION_BRANCH
             existing = api.get(f"/repos/{name}/pulls?state=open&head={urllib.parse.quote(owner + ':' + branch, safe='')}&per_page=100")
             if existing:
                 outcomes.append(dict(repository=name, status="existing_pr", url=existing[0]["html_url"]))
                 continue
-            if api.get(f"/repos/{name}/git/ref/heads/{branch}", optional=True):
-                outcomes.append(dict(repository=name, status="existing_branch", branch=branch,
-                                     reason="Automation branch exists without an open PR; manual review required"))
-                continue
+            branch_ref = api.get(f"/repos/{name}/git/ref/heads/{branch}", optional=True)
             tree = api.tree(name, base)
             if tree.get("truncated"):
                 raise AuditError("Truncated repository tree: automatic remediation skipped")
@@ -184,10 +213,16 @@ def remediate(api, writer, owner, report, policy):
                 outcomes.append(dict(repository=name, status="manual_review",
                                      reason="No eligible direct allowlisted Action references"))
                 continue
+            if branch_ref:
+                if not automation_branch_is_owned(api, name, branch_ref):
+                    outcomes.append(dict(repository=name, status="existing_branch", branch=branch,
+                                         reason="Automation branch exists but is not safely attributable to this automation; manual review required"))
+                    continue
+                writer.delete(f"/repos/{name}/git/refs/heads/{urllib.parse.quote(branch, safe='')}")
             parent_tree = api.get(f"/repos/{name}/git/commits/{base}")["tree"]["sha"]
             new_tree = writer.post(f"/repos/{name}/git/trees", dict(base_tree=parent_tree, tree=files))["sha"]
             commit = writer.post(f"/repos/{name}/git/commits",
-                                 dict(message="ci: migrar Actions legadas para Node.js 24",
+                                 dict(message=AUTOMATION_COMMIT_MESSAGE,
                                       tree=new_tree, parents=[base]))["sha"]
             writer.post(f"/repos/{name}/git/refs", dict(ref="refs/heads/" + branch, sha=commit))
             description = "\n".join(f"- {c['file']}:{c['line']} {c['action']}: {c['old']} -> {c['version']} ({c['sha']})"

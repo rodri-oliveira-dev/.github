@@ -5,17 +5,19 @@ from pathlib import Path
 
 import yaml
 
-from remediate import API, AuditError, plan_file, replace_line, references, remediate
+from remediate import (API, AUTOMATION_BRANCH, AUTOMATION_COMMIT_MESSAGE, AuditError,
+                       plan_file, replace_line, references, remediate)
 from test_scanner import FakeAPI, POLICY, repository, tree
 
 SHA = "b" * 40
 TARGETS = {"actions/checkout": {"sha": SHA, "version": "v7.0.1"}}
 
 class RemediationAPI(FakeAPI):
-    def __init__(self, docs, trees, repos, existing=None, branch_exists=False):
+    def __init__(self, docs, trees, repos, existing=None, branch_exists=False, branch_owned=True):
         super().__init__(docs, trees, repos)
         self.existing = existing or []
         self.branch_exists = branch_exists
+        self.branch_owned = branch_owned
         self.base_sha = "c" * 40
     def get(self, path, optional=False):
         if "/pulls?" in path:
@@ -24,6 +26,9 @@ class RemediationAPI(FakeAPI):
             return {"object": {"sha": SHA}} if self.branch_exists else None
         if "/git/ref/heads/" in path:
             return {"object": {"sha": self.base_sha}}
+        if path.endswith("/git/commits/" + SHA):
+            return {"message": AUTOMATION_COMMIT_MESSAGE if self.branch_owned else "manual change",
+                    "parents": [{"sha": "a" * 40}], "tree": {"sha": "d" * 40}}
         if "/git/commits/" in path:
             return {"tree": {"sha": "d" * 40}}
         raise AssertionError(path)
@@ -31,6 +36,9 @@ class RemediationAPI(FakeAPI):
 class FakeWriter:
     def __init__(self):
         self.calls = []
+        self.deletes = []
+    def delete(self, path):
+        self.deletes.append(path)
     def post(self, path, payload):
         self.calls.append((path, payload))
         if path.endswith("/git/trees"):
@@ -159,17 +167,32 @@ class RemediationTests(unittest.TestCase):
         self.assertEqual(second[0]["status"], "existing_pr")
         self.assertEqual(second_writer.calls, [])
 
-    def test_existing_automation_branch_requires_manual_review(self):
+    def test_owned_stale_automation_branch_is_recycled(self):
         name = "owner/demo"
         docs, workflow = docs_for()
         api = RemediationAPI(docs, {(name, "c" * 40): tree(".github/workflows/ci.yml")},
-                             [repository(name)], branch_exists=True)
+                             [repository(name)], branch_exists=True, branch_owned=True)
+        writer = FakeWriter()
+        result = remediate(api, writer, "owner",
+                           {"findings": [{"repository": name}]},
+                           {"auto_fixes": TARGETS})
+        self.assertEqual(result[0]["status"], "created")
+        self.assertEqual(writer.deletes,
+                         ["/repos/owner/demo/git/refs/heads/automation%2Factions-node24"])
+        self.assertEqual(writer.calls[-1][1]["head"], AUTOMATION_BRANCH)
+
+    def test_unowned_automation_branch_requires_manual_review(self):
+        name = "owner/demo"
+        docs, workflow = docs_for()
+        api = RemediationAPI(docs, {(name, "c" * 40): tree(".github/workflows/ci.yml")},
+                             [repository(name)], branch_exists=True, branch_owned=False)
         writer = FakeWriter()
         result = remediate(api, writer, "owner",
                            {"findings": [{"repository": name}]},
                            {"auto_fixes": TARGETS})
         self.assertEqual(result[0]["status"], "existing_branch")
         self.assertIn("manual review", result[0]["reason"].lower())
+        self.assertEqual(writer.deletes, [])
         self.assertEqual(writer.calls, [])
 
     def test_quoted_uses_preserves_quote(self):

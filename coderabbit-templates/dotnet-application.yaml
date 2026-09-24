@@ -1,0 +1,52 @@
+language: "pt-BR"
+tone_instructions: "Seja técnico, objetivo e acionável. Priorize bugs, segurança, arquitetura, confiabilidade, observabilidade e impactos operacionais."
+reviews:
+  profile: "assertive"
+  request_changes_workflow: false
+  high_level_summary: true
+  review_status: true
+  review_details: true
+  poem: false
+  auto_review:
+    enabled: true
+    drafts: false
+  path_filters:
+    - "!**/bin/**"
+    - "!**/obj/**"
+    - "!**/TestResults/**"
+    - "!**/coverage/**"
+    - "!**/coverage-report/**"
+  path_instructions:
+    - path: "src/**/*.cs"
+      instructions: |
+        Revise como aplicação ou serviço .NET de produção.
+        - Verifique separação de responsabilidades, dependências entre camadas e limites arquiteturais.
+        - Avalie lifetimes de DI, async/await, CancellationToken, concorrência e descarte de recursos.
+        - Verifique autenticação, autorização, validação de entrada, exposição de dados e tratamento de exceções.
+        - Avalie resiliência de integrações HTTP, filas e recursos externos, incluindo timeout, retry e idempotência.
+        - Verifique logging estruturado, correlação, métricas e rastreabilidade de falhas.
+        - Aponte consultas ineficientes, N+1, carregamento excessivo e riscos de performance.
+    - path: "**/Migrations/**"
+      instructions: |
+        Verifique compatibilidade para frente e para trás, risco de perda de dados,
+        locks prolongados, alterações destrutivas, impacto em tabelas grandes e estratégia de rollback.
+    - path: "**/*Tests/**/*.cs"
+      instructions: |
+        Verifique cenários felizes, negativos, integração, concorrência, idempotência e contratos externos relevantes.
+        Evite testes frágeis, dependentes de ordem ou de tempo sem controle determinístico.
+    - path: "**/Dockerfile*"
+      instructions: |
+        Verifique imagem base, usuário não root, redução de superfície de ataque,
+        reprodutibilidade, exposição de secrets e tamanho desnecessário da imagem.
+    - path: "**/compose*.yml"
+      instructions: |
+        Verifique redes, portas, volumes, health checks, secrets e consistência entre dependências.
+    - path: ".github/workflows/**"
+      instructions: |
+        Verifique permissões mínimas, exposição de secrets, pinning seguro de actions,
+        supply chain, ambientes, conditions e gates antes de publicação ou deploy.
+    - path: "**/*.md"
+      instructions: |
+        Verifique se documentação de arquitetura, execução, configuração e operação corresponde ao comportamento implementado.
+chat:
+  auto_reply: true

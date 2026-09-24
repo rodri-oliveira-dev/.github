@@ -1,0 +1,95 @@
+name: Distribute CodeRabbit configuration
+
+on:
+  schedule:
+    # GitHub cron has no fixed "every 15 days" interval across month boundaries.
+    # Trigger daily at 09:00 UTC and gate the mutation steps to an exact 15-day cadence.
+    - cron: "0 9 * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Detect drift without creating or updating branches and Pull Requests"
+        required: false
+        default: false
+        type: boolean
+      force:
+        description: "Run now, ignoring the 15-day schedule gate"
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: distribute-coderabbit-config
+  cancel-in-progress: false
+
+jobs:
+  distribute:
+    name: Synchronize .coderabbit.yaml across mapped repositories
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Check 15-day cadence
+        id: cadence
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          FORCE: ${{ github.event_name == 'workflow_dispatch' && inputs.force || false }}
+        run: |
+          set -Eeuo pipefail
+
+          if [[ "$EVENT_NAME" == "workflow_dispatch" && "$FORCE" == "true" ]]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # 2026-09-24 is the cadence anchor. Scheduled mutation runs occur every 15 UTC days.
+          anchor_epoch="$(date -u -d '2026-09-24 00:00:00 UTC' +%s)"
+          today_epoch="$(date -u -d "$(date -u +%F) 00:00:00 UTC" +%s)"
+          elapsed_days=$(( (today_epoch - anchor_epoch) / 86400 ))
+
+          if (( elapsed_days >= 0 && elapsed_days % 15 == 0 )); then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            {
+              echo "## CodeRabbit configuration distribution"
+              echo
+              echo "No synchronization is due today. The mutation cadence is every 15 days."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Checkout governance repository
+        if: steps.cadence.outputs.run == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 1
+          persist-credentials: false
+          sparse-checkout: |
+            .github/scripts/automation/distribute-coderabbit-config.sh
+            coderabbit-templates
+
+      - name: Create GitHub App token
+        if: steps.cadence.outputs.run == 'true'
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.DOTNET_SDK_SYNC_APP_CLIENT_ID }}
+          private-key: ${{ secrets.DOTNET_SDK_SYNC_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          permission-contents: write
+          permission-pull-requests: write
+
+      - name: Distribute CodeRabbit remote configuration
+        if: steps.cadence.outputs.run == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          OWNER: ${{ github.repository_owner }}
+          CENTRAL_REPO: ${{ github.repository }}
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || false }}
+        run: bash "$GITHUB_WORKSPACE/.github/scripts/automation/distribute-coderabbit-config.sh"

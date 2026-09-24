@@ -157,13 +157,14 @@ def remediate(api, writer, owner, report, policy):
             if not branch_name:
                 raise AuditError("Missing default branch")
             base = api.get(f"/repos/{name}/git/ref/heads/{urllib.parse.quote(branch_name, safe='')}")["object"]["sha"]
-            branch = "automation/actions-node24-" + base[:12]
+            branch = "automation/actions-node24"
             existing = api.get(f"/repos/{name}/pulls?state=open&head={urllib.parse.quote(owner + ':' + branch, safe='')}&per_page=100")
             if existing:
                 outcomes.append(dict(repository=name, status="existing_pr", url=existing[0]["html_url"]))
                 continue
             if api.get(f"/repos/{name}/git/ref/heads/{branch}", optional=True):
-                outcomes.append(dict(repository=name, status="existing_branch", branch=branch))
+                outcomes.append(dict(repository=name, status="existing_branch", branch=branch,
+                                     reason="Automation branch exists without an open PR; manual review required"))
                 continue
             tree = api.tree(name, base)
             if tree.get("truncated"):

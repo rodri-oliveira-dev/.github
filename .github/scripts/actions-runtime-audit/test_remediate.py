@@ -137,6 +137,41 @@ class RemediationTests(unittest.TestCase):
         self.assertEqual(writer.calls[0][1]["tree"][0]["path"], ".github/workflows/ci.yml")
         self.assertIn("checkout@" + SHA, writer.calls[0][1]["tree"][0]["content"])
 
+
+    def test_stable_branch_prevents_duplicate_pr_after_base_moves(self):
+        name = "owner/demo"
+        docs, workflow = docs_for()
+        api = RemediationAPI(docs, {(name, "c" * 40): tree(".github/workflows/ci.yml")},
+                             [repository(name)])
+        first_writer = FakeWriter()
+        first = remediate(api, first_writer, "owner",
+                          {"findings": [{"repository": name}]},
+                          {"auto_fixes": TARGETS})
+        self.assertEqual(first[0]["status"], "created")
+        self.assertEqual(first_writer.calls[-1][1]["head"], "automation/actions-node24")
+
+        api.base_sha = "1" * 40
+        api.existing = [{"html_url": "https://github.com/owner/demo/pull/1"}]
+        second_writer = FakeWriter()
+        second = remediate(api, second_writer, "owner",
+                           {"findings": [{"repository": name}]},
+                           {"auto_fixes": TARGETS})
+        self.assertEqual(second[0]["status"], "existing_pr")
+        self.assertEqual(second_writer.calls, [])
+
+    def test_existing_automation_branch_requires_manual_review(self):
+        name = "owner/demo"
+        docs, workflow = docs_for()
+        api = RemediationAPI(docs, {(name, "c" * 40): tree(".github/workflows/ci.yml")},
+                             [repository(name)], branch_exists=True)
+        writer = FakeWriter()
+        result = remediate(api, writer, "owner",
+                           {"findings": [{"repository": name}]},
+                           {"auto_fixes": TARGETS})
+        self.assertEqual(result[0]["status"], "existing_branch")
+        self.assertIn("manual review", result[0]["reason"].lower())
+        self.assertEqual(writer.calls, [])
+
     def test_quoted_uses_preserves_quote(self):
         line = '      - uses: "actions/checkout@v4" # v4\n'
         new = replace_line(line, "actions/checkout@v4", TARGETS["actions/checkout"])

@@ -143,8 +143,13 @@ class Scanner:
         if use.startswith("docker://"):
             self.record(origin, file, line, use, "unverified", "Docker image is out of scope")
             return
-        if use.startswith("./"):
-            repo, target_ref, path, kind = origin, ref, use[2:].rstrip("/"), "action"
+        if use.startswith(("./", "$/")):
+            repo, target_ref, path = origin, ref, use[2:].rstrip("/")
+            if use.startswith("$/") and not path:
+                self.record(origin, file, line, use, "unverified", "Self-repository reference without path")
+                return
+            kind = ("workflow" if path.startswith(".github/workflows/")
+                    and path.endswith((".yml", ".yaml")) else "action")
         else:
             match = REMOTE.fullmatch(use)
             if not match:
@@ -177,7 +182,12 @@ class Scanner:
             manifest_source, doc = result
             if kind == "workflow":
                 for child in workflow_uses(doc):
-                    self.inspect_use(origin, file, ref, source, child, depth + 1, ancestry | {key})
+                    if child.startswith(("./", "$/")):
+                        child_repo, child_file, child_ref, child_source = repo, resolved_path, target_ref, manifest_source
+                    else:
+                        child_repo, child_file, child_ref, child_source = origin, file, ref, source
+                    self.inspect_use(child_repo, child_file, child_ref, child_source,
+                                     child, depth + 1, ancestry | {key})
                 return
             runs = doc.get("runs", {})
             runtime = str(runs.get("using", "")).lower() if isinstance(runs, dict) else ""
@@ -191,11 +201,11 @@ class Scanner:
                     self.record(origin, file, line, use, "unverified", f"Runtime {runtime} not covered by policy")
             elif runtime == "composite":
                 for child in composite_uses(doc):
-                    if child.startswith("./"):
-                        child_repo, child_file, child_ref = repo, resolved_path, target_ref
+                    if child.startswith(("./", "$/")):
+                        child_repo, child_file, child_ref, child_source = repo, resolved_path, target_ref, manifest_source
                     else:
-                        child_repo, child_file, child_ref = origin, file, ref
-                    self.inspect_use(child_repo, child_file, child_ref, manifest_source,
+                        child_repo, child_file, child_ref, child_source = origin, file, ref, source
+                    self.inspect_use(child_repo, child_file, child_ref, child_source,
                                      child, depth + 1, ancestry | {key})
             else:
                 self.record(origin, file, line, use, "unverified", f"Non-JavaScript or unknown Action runtime: {runtime}")

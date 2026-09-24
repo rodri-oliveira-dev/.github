@@ -112,20 +112,34 @@ jobs:
         with:
           name: actions-runtime-audit
           path: ${{ runner.temp }}/actions-runtime-input
+      - name: Derive least-privilege remediation repository scope
+        id: remediation-scope
+        shell: bash
+        env:
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          set -Eeuo pipefail
+          python .github/scripts/actions-runtime-audit/scope.py \
+            --owner "$OWNER" \
+            --report "$RUNNER_TEMP/actions-runtime-input/report.json" \
+            --github-output "$GITHUB_OUTPUT"
 
       - name: Create write-enabled GitHub App token only for opted-in remediation
+        if: steps.remediation-scope.outputs.count != '0'
         id: write-token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
           client-id: ${{ vars.DOTNET_SDK_SYNC_APP_CLIENT_ID }}
           private-key: ${{ secrets.DOTNET_SDK_SYNC_APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
+          repositories: ${{ steps.remediation-scope.outputs.repositories }}
           permission-contents: write
           permission-metadata: read
           permission-pull-requests: write
           permission-workflows: write
 
       - name: Open one draft PR per public repository with eligible safe fixes
+        if: steps.remediation-scope.outputs.count != '0'
         shell: bash
         env:
           GH_TOKEN: ${{ steps.write-token.outputs.token }}

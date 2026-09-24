@@ -4,6 +4,7 @@ import unittest
 from pathlib import Path
 import yaml
 from scanner import API, AuditError, Scanner, workflow_uses, markdown
+from scope import repository_scope
 
 POLICY = json.loads((Path(__file__).parent / "policy.json").read_text())
 
@@ -99,6 +100,69 @@ class AuditTests(unittest.TestCase):
                       {(name, "main"): tree(".github/workflows/ci.yml")}, [repository(name)])
         result = Scanner(api, POLICY).run("rodrigo")
         self.assertEqual(len(result["unverified"]), 2)
+
+
+    def test_local_reusable_workflow_is_scanned_as_workflow(self):
+        name = "rodrigo/demo"
+        docs = {(name, ".github/workflows/ci.yml", "main"):
+                    "jobs:\n  call:\n    uses: ./.github/workflows/reusable.yml\n",
+                (name, ".github/workflows/reusable.yml", "main"):
+                    "jobs:\n  x:\n    steps:\n      - uses: actions/checkout@v4\n",
+                ("actions/checkout", "action.yml", "v4"): "runs:\n  using: node20\n"}
+        result = Scanner(FakeAPI(docs, {(name, "main"): tree(
+            ".github/workflows/ci.yml", ".github/workflows/reusable.yml")},
+            [repository(name)]), POLICY).run("rodrigo")
+        nested = [f for f in result["findings"] if f["action"] == "actions/checkout@v4"]
+        self.assertTrue(nested)
+        self.assertTrue(any(f["file"] == ".github/workflows/reusable.yml" and f["line"] == 4
+                            for f in nested))
+
+    def test_self_repository_action_reference_is_resolved(self):
+        name = "rodrigo/demo"
+        docs = {(name, ".github/workflows/ci.yml", "main"):
+                    "jobs:\n  x:\n    steps:\n      - uses: $/.github/actions/build\n",
+                (name, ".github/actions/build/action.yml", "main"):
+                    "runs:\n  using: node20\n"}
+        result = Scanner(FakeAPI(docs, {(name, "main"): tree(".github/workflows/ci.yml")},
+            [repository(name)]), POLICY).run("rodrigo")
+        self.assertTrue(any(f["action"] == "$/.github/actions/build" and f["line"] == 4
+                            for f in result["findings"]))
+
+    def test_empty_self_repository_reference_is_unverified(self):
+        name = "rodrigo/demo"
+        docs = {(name, ".github/workflows/ci.yml", "main"):
+                    "jobs:\n  x:\n    steps:\n      - uses: $/\n"}
+        result = Scanner(FakeAPI(docs, {(name, "main"): tree(".github/workflows/ci.yml")},
+            [repository(name)]), POLICY).run("rodrigo")
+        self.assertTrue(any(f["reason"] == "Self-repository reference without path"
+                            for f in result["unverified"]))
+
+    def test_composite_child_line_number_matches_reported_file(self):
+        name = "rodrigo/demo"
+        docs = {(name, ".github/workflows/ci.yml", "main"):
+                    "jobs:\n  x:\n    steps:\n      - uses: ./.github/actions/build\n",
+                (name, ".github/actions/build/action.yml", "main"):
+                    "runs:\n  using: composite\n  steps:\n    - uses: actions/upload-artifact@v4\n",
+                ("actions/upload-artifact", "action.yml", "v4"):
+                    "runs:\n  using: node20\n"}
+        result = Scanner(FakeAPI(docs, {(name, "main"): tree(
+            ".github/workflows/ci.yml", ".github/actions/build/action.yml")},
+            [repository(name)]), POLICY).run("rodrigo")
+        nested = [f for f in result["findings"] if f["action"] == "actions/upload-artifact@v4"]
+        self.assertTrue(any(f["file"] == ".github/actions/build/action.yml" and f["line"] == 4
+                            for f in nested))
+        self.assertTrue(any(f["file"] == ".github/workflows/ci.yml" and f["line"] is None
+                            for f in nested))
+
+    def test_repository_scope_filters_owner_invalid_and_duplicates(self):
+        report = {"findings": [
+            {"repository": "rodrigo/beta"},
+            {"repository": "other/skip"},
+            {"repository": "rodrigo/alpha"},
+            {"repository": "RODRIGO/alpha"},
+            {"repository": "invalid"},
+        ]}
+        self.assertEqual(repository_scope(report, "rodrigo"), ["alpha", "beta"])
 
     def test_external_host_rejected(self):
         with self.assertRaises(AuditError):

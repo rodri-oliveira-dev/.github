@@ -122,8 +122,21 @@ def node_mapping(node):
             if isinstance(key, yaml.nodes.ScalarNode)}
 
 
+class AliasLocationLoader(yaml.SafeLoader):
+    """Clone scalar aliases so each occurrence keeps its own source mark."""
+
+    def compose_node(self, parent, index):
+        event = self.peek_event()
+        node = super().compose_node(parent, index)
+        if (isinstance(event, yaml.events.AliasEvent)
+                and isinstance(node, yaml.nodes.ScalarNode)):
+            return yaml.nodes.ScalarNode(
+                node.tag, node.value, event.start_mark, event.end_mark, node.style)
+        return node
+
+
 def workflow_use_locations(source):
-    root = node_mapping(yaml.compose(source, Loader=yaml.SafeLoader))
+    root = node_mapping(yaml.compose(source, Loader=AliasLocationLoader))
     jobs = node_mapping(root.get("jobs"))
     for job in jobs.values():
         fields = node_mapping(job)
@@ -139,7 +152,7 @@ def workflow_use_locations(source):
 
 
 def composite_use_locations(source):
-    root = node_mapping(yaml.compose(source, Loader=yaml.SafeLoader))
+    root = node_mapping(yaml.compose(source, Loader=AliasLocationLoader))
     runs = node_mapping(root.get("runs"))
     using = runs.get("using")
     if not isinstance(using, yaml.nodes.ScalarNode) or using.value.lower() != "composite":

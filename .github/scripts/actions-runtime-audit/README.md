@@ -4,6 +4,12 @@ Auditoria somente de leitura dos **repositórios públicos ativos** acessíveis 
 
 **Confidencialidade:** o repositório central .github é público. Por isso, os repositórios privados ficam fora do escopo e apenas sua quantidade é exibida. Para um relatório acionável de repositórios privados, publique este mesmo scanner em um repositório central privado, com token e artefatos privados. Este workflow público não revela nomes, caminhos nem conteúdo de repositórios privados.
 
+## Reutilização em outros repositórios
+
+> **Implementação de referência, não um workflow pronto para copiar e colar.** O arquivo [`actions-runtime-audit.yml`](../../workflows/actions-runtime-audit.yml) depende dos scripts, dos testes e da configuração de [`policy.json`](policy.json) nesta pasta. Copiar somente o YAML não é suficiente para executá-lo em outra conta ou organização.
+
+Antes de reutilizar, adapte o proprietário e o escopo dos repositórios, a política de runtimes e os SHAs permitidos para correção, o agendamento e as variáveis `DOTNET_SDK_SYNC_APP_CLIENT_ID` e `DOTNET_SDK_SYNC_APP_PRIVATE_KEY` para sua própria GitHub App. Configure e aprove na instalação as permissões necessárias: leitura para a auditoria e, **somente se habilitar `apply_fixes`**, escrita em Contents, Pull requests e Workflows. Execute os testes, faça uma auditoria inicial sem correções e revise os diffs e os checks de cada PR antes do merge.
+
 ## Execução e relatório
 
 Disponível em Actions → GitHub Actions runtime audit → Run workflow. Executa diariamente às 10:15 UTC (07:15 em São Paulo, UTC−03), usando a GitHub App já configurada por DOTNET_SDK_SYNC_APP_CLIENT_ID e DOTNET_SDK_SYNC_APP_PRIVATE_KEY, com permissões contents:read e metadata:read. A instalação deve ter acesso aos repositórios auditados.

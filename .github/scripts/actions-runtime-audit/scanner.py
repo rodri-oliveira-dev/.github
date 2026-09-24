@@ -114,6 +114,44 @@ def composite_uses(doc):
             if isinstance(step, dict) and isinstance(step.get("uses"), str):
                 yield step["uses"]
 
+
+def node_mapping(node):
+    if not isinstance(node, yaml.nodes.MappingNode):
+        return {}
+    return {key.value: value for key, value in node.value
+            if isinstance(key, yaml.nodes.ScalarNode)}
+
+
+def workflow_use_locations(source):
+    root = node_mapping(yaml.compose(source, Loader=yaml.SafeLoader))
+    jobs = node_mapping(root.get("jobs"))
+    for job in jobs.values():
+        fields = node_mapping(job)
+        use = fields.get("uses")
+        if isinstance(use, yaml.nodes.ScalarNode):
+            yield use.value, use.start_mark.line + 1
+        steps = fields.get("steps")
+        if isinstance(steps, yaml.nodes.SequenceNode):
+            for step in steps.value:
+                use = node_mapping(step).get("uses")
+                if isinstance(use, yaml.nodes.ScalarNode):
+                    yield use.value, use.start_mark.line + 1
+
+
+def composite_use_locations(source):
+    root = node_mapping(yaml.compose(source, Loader=yaml.SafeLoader))
+    runs = node_mapping(root.get("runs"))
+    using = runs.get("using")
+    if not isinstance(using, yaml.nodes.ScalarNode) or using.value.lower() != "composite":
+        return
+    steps = runs.get("steps")
+    if isinstance(steps, yaml.nodes.SequenceNode):
+        for step in steps.value:
+            use = node_mapping(step).get("uses")
+            if isinstance(use, yaml.nodes.ScalarNode):
+                yield use.value, use.start_mark.line + 1
+
+
 def source_line(source, reference):
     for match in USES.finditer(source):
         if match.group(1) == reference:
@@ -135,8 +173,8 @@ class Scanner:
             obj.update(reason=detail)
             self.unverified.append(obj)
 
-    def inspect_use(self, origin, file, ref, source, use, depth=0, ancestry=frozenset()):
-        line = source_line(source, use)
+    def inspect_use(self, origin, file, ref, source, use, depth=0, ancestry=frozenset(), line=None):
+        line = line if line is not None else source_line(source, use)
         if "$" + "{" in use:
             self.record(origin, file, line, use, "unverified", "Dynamic reference")
             return
@@ -181,13 +219,15 @@ class Scanner:
                 return
             manifest_source, doc = result
             if kind == "workflow":
-                for child in workflow_uses(doc):
+                for child, child_line in workflow_use_locations(manifest_source):
                     if child.startswith(("./", "$/")):
                         child_repo, child_file, child_ref, child_source = repo, resolved_path, target_ref, manifest_source
+                        reported_line = child_line
                     else:
                         child_repo, child_file, child_ref, child_source = origin, file, ref, source
+                        reported_line = None
                     self.inspect_use(child_repo, child_file, child_ref, child_source,
-                                     child, depth + 1, ancestry | {key})
+                                     child, depth + 1, ancestry | {key}, reported_line)
                 return
             runs = doc.get("runs", {})
             runtime = str(runs.get("using", "")).lower() if isinstance(runs, dict) else ""
@@ -200,13 +240,15 @@ class Scanner:
                 elif runtime != self.policy["required_runtime"]:
                     self.record(origin, file, line, use, "unverified", f"Runtime {runtime} not covered by policy")
             elif runtime == "composite":
-                for child in composite_uses(doc):
+                for child, child_line in composite_use_locations(manifest_source):
                     if child.startswith(("./", "$/")):
                         child_repo, child_file, child_ref, child_source = repo, resolved_path, target_ref, manifest_source
+                        reported_line = child_line
                     else:
                         child_repo, child_file, child_ref, child_source = origin, file, ref, source
+                        reported_line = None
                     self.inspect_use(child_repo, child_file, child_ref, child_source,
-                                     child, depth + 1, ancestry | {key})
+                                     child, depth + 1, ancestry | {key}, reported_line)
             else:
                 self.record(origin, file, line, use, "unverified", f"Non-JavaScript or unknown Action runtime: {runtime}")
         except AuditError as error:
@@ -235,15 +277,16 @@ class Scanner:
                     raise AuditError("YAML missing")
                 source, doc = result
                 self.files_scanned += 1
-                uses = list(workflow_uses(doc)) if path.startswith(".github/workflows/") else list(composite_uses(doc))
+                uses = (list(workflow_use_locations(source)) if path.startswith(".github/workflows/")
+                        else list(composite_use_locations(source)))
                 if path.endswith(("action.yml", "action.yaml")):
                     runs = doc.get("runs", {})
                     runtime = str(runs.get("using", "")).lower() if isinstance(runs, dict) else ""
                     if runtime in self.policy["legacy_runtimes"]:
                         self.record(name, path, None, "local Action", "legacy_runtime",
                                     f"Own Action declares {runtime}; migrate to Node 24")
-                for use in uses:
-                    self.inspect_use(name, path, branch, source, use)
+                for use, line in uses:
+                    self.inspect_use(name, path, branch, source, use, line=line)
             except AuditError as error:
                 self.record(name, path, None, "", "unverified", str(error))
 

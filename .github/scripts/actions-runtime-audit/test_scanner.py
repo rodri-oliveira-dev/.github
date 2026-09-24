@@ -38,6 +38,22 @@ class AuditTests(unittest.TestCase):
         doc = yaml.safe_load('jobs:\n  x:\n    steps:\n      - run: |\n          echo "uses: bad/action@v1"\n      - uses: actions/checkout@v4\n')
         self.assertEqual(list(workflow_uses(doc)), ["actions/checkout@v4"])
 
+    def test_repeated_identical_action_references_keep_distinct_lines(self):
+        name = "rodrigo/demo"
+        source = ("jobs:\n  x:\n    steps:\n"
+                  "      - uses: actions/upload-artifact@v4\n"
+                  "      - uses: actions/upload-artifact@v4\n"
+                  "      - uses: actions/upload-artifact@v4\n")
+        docs = {
+            (name, ".github/workflows/ci.yml", "main"): source,
+            ("actions/upload-artifact", "action.yml", "v4"): "runs:\n  using: node20\n",
+        }
+        result = Scanner(FakeAPI(docs, {(name, "main"): tree(".github/workflows/ci.yml")},
+                                 [repository(name)]), POLICY).run("rodrigo")
+        findings = [item for item in result["findings"]
+                    if item["action"] == "actions/upload-artifact@v4"]
+        self.assertEqual([item["line"] for item in findings], [4, 5, 6])
+
     def test_pinned_sha_uses_manifest_not_version_comment(self):
         sha = "a" * 40
         name = "rodrigo/demo"

@@ -402,7 +402,25 @@ write_summary() {
 
 validate_inputs
 
-while IFS=$'\t' read -r template_name repo; do
+if ! gh auth setup-git > /dev/null 2> "$TMP_DIR/gh-auth-setup.log"; then
+  echo "::error::Unable to configure Git authentication for cross-repository pushes: $(tr '\n' ' ' < "$TMP_DIR/gh-auth-setup.log")"
+  exit 1
+fi
+
+while IFS=  echo "::group::CodeRabbit sync - $repo ($template_name)"
+  if ! process_repository "$template_name" "$repo"; then
+    record_error "$repo" "$template_name" "${LAST_ERROR:-Unknown error}"
+  fi
+  echo "::endgroup::"
+done < <(jq -r '.templates | to_entries[] | .key as $template | .value[] | [$template, .] | @tsv' "$MAPPING_FILE")
+
+write_summary
+
+if [[ -s "$ERRORS_FILE" ]]; then
+  echo "::error::CodeRabbit configuration distribution completed with one or more repository errors."
+  exit 1
+fi
+\t' read -r template_name repo; do
   echo "::group::CodeRabbit sync - $repo ($template_name)"
   if ! process_repository "$template_name" "$repo"; then
     record_error "$repo" "$template_name" "${LAST_ERROR:-Unknown error}"

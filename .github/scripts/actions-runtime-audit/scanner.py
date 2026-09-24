@@ -254,7 +254,8 @@ class Scanner:
         archived = sum(bool(repo.get("archived")) and not repo.get("private")
                        for repo in repositories)
         public = sorted((repo for repo in repositories if not repo.get("private")
-                         and repo.get("visibility", "public") == "public" and not repo.get("archived")),
+                         and repo.get("visibility", "public") == "public"
+                         and not repo.get("archived") and not repo.get("fork")),
                         key=lambda repo: repo["full_name"].lower())
         for repo in public:
             self.inspect_repository(repo)

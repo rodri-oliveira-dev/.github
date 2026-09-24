@@ -25,9 +25,10 @@ class FakeAPI:
             raise AuditError("Missing YAML")
         return source, yaml.safe_load(source)
 
-def repository(name, private=False, archived=False):
+def repository(name, private=False, archived=False, fork=False):
     return dict(full_name=name, owner={"login": name.split("/")[0]}, default_branch="main",
-                private=private, archived=archived, visibility="private" if private else "public")
+                private=private, archived=archived, fork=fork,
+                visibility="private" if private else "public")
 
 def tree(*paths, truncated=False):
     return {"tree": [{"path": p, "type": "blob"} for p in paths], "truncated": truncated}
@@ -84,6 +85,16 @@ class AuditTests(unittest.TestCase):
         self.assertEqual(result["repositories_scanned"], 1)
         self.assertNotIn(private, json.dumps(result) + markdown(result))
         self.assertNotIn(private, repr(api.requests))
+
+    def test_public_forks_are_excluded_before_scanning(self):
+        name, fork = "rodrigo/public", "rodrigo/public-fork"
+        api = FakeAPI({(name, ".github/workflows/ci.yml", "main"): "jobs: {}\n"},
+                      {(name, "main"): tree(".github/workflows/ci.yml")},
+                      [repository(name), repository(fork, fork=True)])
+        result = Scanner(api, POLICY).run("rodrigo")
+        self.assertEqual(result["repositories_scanned"], 1)
+        self.assertNotIn(fork, json.dumps(result) + markdown(result))
+        self.assertNotIn(fork, repr(api.requests))
 
     def test_incomplete_tree_and_unreadable_manifest(self):
         name = "rodrigo/demo"

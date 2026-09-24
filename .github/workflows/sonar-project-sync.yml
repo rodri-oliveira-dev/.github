@@ -1,0 +1,50 @@
+name: Sync Sonar issues to project
+
+on:
+  schedule:
+    # 06:00 America/Sao_Paulo (09:00 UTC), daily.
+    - cron: "0 9 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sonar-project-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Sync Sonar quality issues
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout trusted automation without credentials
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/scripts/automation
+
+      - name: Validate project token
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.PROJECTS_TOKEN }}
+        run: |
+          if [[ -z "${GH_TOKEN}" ]]; then
+            echo "::error title=Missing PROJECTS_TOKEN::Create a classic personal access token with the project scope and save it as the PROJECTS_TOKEN repository secret."
+            exit 1
+          fi
+
+      - name: Synchronize Sonar issues with Project #1
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.PROJECTS_TOKEN }}
+          PROJECT_OWNER: ${{ github.repository_owner }}
+          PROJECT_NUMBER: "1"
+          VIEW_NAME: "Sonar Quality Issues"
+          VIEW_FILTER: 'is:issue is:open label:"Sonar Quality Issues"'
+          ISSUE_SEARCH_QUERY: 'is:issue is:open user:${{ github.repository_owner }} label:"Sonar Quality Issues"'
+        run: bash "$GITHUB_WORKSPACE/.github/scripts/automation/sonar-project-sync.sh"

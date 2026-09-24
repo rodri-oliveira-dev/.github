@@ -21,9 +21,9 @@ Closed issues remain in the Project history but disappear from the dedicated vie
 
 Create a repository secret named `PROJECTS_TOKEN` in `rodri-oliveira-dev/.github`.
 
-Use a **classic personal access token** with the `project` scope. The current GitHub API for user-owned Projects does not support fine-grained personal access tokens or GitHub App tokens for these operations.
+Use a **classic personal access token** with the `project` scope. GitHub documents the `project` scope for GitHub CLI sessions that need to edit Projects, which is the authentication model used by this workflow.
 
-If private repositories should also participate in the global search, grant the classic token the additional repository access required for those repositories.
+If private repositories should also participate in the global search, grant the token the additional repository access required for those repositories.
 
 Do not store the token in the repository, workflow file, variables, logs, or documentation.
 

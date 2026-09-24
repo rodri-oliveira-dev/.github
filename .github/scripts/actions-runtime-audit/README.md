@@ -16,3 +16,14 @@ Para executar os testes locais:
     python -m unittest discover -s .github/scripts/actions-runtime-audit -p 'test_*.py'
 
 A auditoria não substitui testes de execução de CI, análise de vulnerabilidades, verificação de runners self-hosted ou revisão de imagens Docker.
+
+
+## Correção automática opcional
+
+Na execução manual, marque a opção booleana **apply_fixes** para criar um PR em modo rascunho por repositório público elegível. Sem a opção, inclusive na execução agendada, a auditoria continua exclusivamente de leitura. O job de correção é separado do job de auditoria e só recebe credenciais de escrita após o opt-in explícito.
+
+A GitHub App deve ter, na instalação, as permissões de repositório Contents: write, Pull requests: write e Workflows: write, além de Metadata: read. **Workflows: write é necessário para modificar .github/workflows**. Se a instalação ainda não tiver essa permissão, um administrador precisa concedê-la/aprovar o novo conjunto de permissões; o workflow sinalizará a impossibilidade de criar os PRs. O GITHUB_TOKEN deste repositório permanece somente de leitura.
+
+O processo usa uma allowlist explícita em policy.json com tags e SHAs completos de Actions oficiais, verifica os manifestos de origem (runtime legado) e de destino (node24), altera somente referências remotas diretas dentro de steps ou jobs de workflows e Actions compostas próprias, e mantém os demais campos e comentários existentes. Referências dinâmicas, Actions de terceiros, Actions JavaScript próprias e dependências indiretas continuam para revisão manual. O relatório não garante compatibilidade comportamental das versões novas; cada PR deve passar por revisão e CI antes do merge.
+
+Para cada repositório, a automação prepara uma única alteração atômica em uma branch derivada do SHA da branch padrão. Se já houver PR aberto para a branch automatizada, ela não recebe novos commits. Se uma branch automatizada existir sem PR, a execução não a sobrescreve. Erros por repositório constam do artefato remediation.json e fazem o job falhar, sem desfazer PRs criados em outros repositórios. A automação não inclui privados, forks ou arquivados, não aprova nem integra PRs e não executa código de repositórios consumidores.

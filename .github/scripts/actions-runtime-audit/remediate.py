@@ -119,20 +119,22 @@ class Writer:
             raise AuditError("Write-enabled GitHub App token is required")
         self.token = token
 
-    def delete(self, path):
+    def patch(self, path, data):
         if not path.startswith("/") or path.startswith("//"):
             raise AuditError("Invalid GitHub API path")
         request = urllib.request.Request(
             "https://api.github.com" + path,
+            data=json.dumps(data).encode("utf-8"),
             headers={"Authorization": "Bearer " + self.token,
                      "Accept": "application/vnd.github+json",
+                     "Content-Type": "application/json",
                      "X-GitHub-Api-Version": "2022-11-28",
-                     "User-Agent": "actions-runtime-remediator"}, method="DELETE")
+                     "User-Agent": "actions-runtime-remediator"}, method="PATCH")
         try:
-            with urllib.request.urlopen(request, timeout=30):
-                return
+            with urllib.request.urlopen(request, timeout=30) as response:
+                return json.load(response)
         except urllib.error.HTTPError as error:
-            raise AuditError(f"GitHub delete rejected (HTTP {error.code})") from error
+            raise AuditError(f"GitHub ref update rejected (HTTP {error.code})") from error
         except urllib.error.URLError as error:
             raise AuditError("GitHub write API unavailable") from error
 
@@ -213,18 +215,20 @@ def remediate(api, writer, owner, report, policy):
                 outcomes.append(dict(repository=name, status="manual_review",
                                      reason="No eligible direct allowlisted Action references"))
                 continue
-            if branch_ref:
-                if not automation_branch_is_owned(api, name, branch_ref):
-                    outcomes.append(dict(repository=name, status="existing_branch", branch=branch,
-                                         reason="Automation branch exists but is not safely attributable to this automation; manual review required"))
-                    continue
-                writer.delete(f"/repos/{name}/git/refs/heads/{branch}")
+            if branch_ref and not automation_branch_is_owned(api, name, branch_ref):
+                outcomes.append(dict(repository=name, status="existing_branch", branch=branch,
+                                     reason="Automation branch exists but is not safely attributable to this automation; manual review required"))
+                continue
             parent_tree = api.get(f"/repos/{name}/git/commits/{base}")["tree"]["sha"]
             new_tree = writer.post(f"/repos/{name}/git/trees", dict(base_tree=parent_tree, tree=files))["sha"]
             commit = writer.post(f"/repos/{name}/git/commits",
                                  dict(message=AUTOMATION_COMMIT_MESSAGE,
                                       tree=new_tree, parents=[base]))["sha"]
-            writer.post(f"/repos/{name}/git/refs", dict(ref="refs/heads/" + branch, sha=commit))
+            if branch_ref:
+                writer.patch(f"/repos/{name}/git/refs/heads/{branch}",
+                             dict(sha=commit, force=True))
+            else:
+                writer.post(f"/repos/{name}/git/refs", dict(ref="refs/heads/" + branch, sha=commit))
             description = "\n".join(f"- {c['file']}:{c['line']} {c['action']}: {c['old']} -> {c['version']} ({c['sha']})"
                                     for c in changes)
             body = ("## Correções propostas\n\n"

@@ -36,9 +36,10 @@ class RemediationAPI(FakeAPI):
 class FakeWriter:
     def __init__(self):
         self.calls = []
-        self.deletes = []
-    def delete(self, path):
-        self.deletes.append(path)
+        self.patches = []
+    def patch(self, path, payload):
+        self.patches.append((path, payload))
+        return {}
     def post(self, path, payload):
         self.calls.append((path, payload))
         if path.endswith("/git/trees"):
@@ -166,6 +167,7 @@ class RemediationTests(unittest.TestCase):
                            {"auto_fixes": TARGETS})
         self.assertEqual(second[0]["status"], "existing_pr")
         self.assertEqual(second_writer.calls, [])
+        self.assertEqual(second_writer.patches, [])
 
     def test_owned_stale_automation_branch_is_recycled(self):
         name = "owner/demo"
@@ -177,8 +179,9 @@ class RemediationTests(unittest.TestCase):
                            {"findings": [{"repository": name}]},
                            {"auto_fixes": TARGETS})
         self.assertEqual(result[0]["status"], "created")
-        self.assertEqual(writer.deletes,
-                         ["/repos/owner/demo/git/refs/heads/automation/actions-node24"])
+        self.assertEqual(writer.patches,
+                         [("/repos/owner/demo/git/refs/heads/automation/actions-node24",
+                           {"sha": "f" * 40, "force": True})])
         self.assertEqual(writer.calls[-1][1]["head"], AUTOMATION_BRANCH)
 
     def test_unowned_automation_branch_requires_manual_review(self):
@@ -192,7 +195,7 @@ class RemediationTests(unittest.TestCase):
                            {"auto_fixes": TARGETS})
         self.assertEqual(result[0]["status"], "existing_branch")
         self.assertIn("manual review", result[0]["reason"].lower())
-        self.assertEqual(writer.deletes, [])
+        self.assertEqual(writer.patches, [])
         self.assertEqual(writer.calls, [])
 
     def test_quoted_uses_preserves_quote(self):

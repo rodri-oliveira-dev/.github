@@ -1,0 +1,18 @@
+{
+  "required_runtime": "node24",
+  "legacy_runtimes": [
+    "node20",
+    "node16",
+    "node12"
+  ],
+  "max_depth": 5,
+  "recommended_actions": {
+    "actions/checkout": "actions/checkout@v7",
+    "actions/upload-artifact": "actions/upload-artifact@v7",
+    "actions/download-artifact": "actions/download-artifact@v8",
+    "actions/setup-node": "actions/setup-node@v7",
+    "actions/setup-dotnet": "actions/setup-dotnet@v6",
+    "actions/setup-python": "actions/setup-python@v6",
+    "actions/setup-java": "actions/setup-java@v5"
+  }
+}

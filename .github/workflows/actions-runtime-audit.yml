@@ -1,0 +1,73 @@
+name: GitHub Actions runtime audit
+
+on:
+  schedule:
+    # 07:15 America/Sao_Paulo (10:15 UTC), daily
+    - cron: "15 10 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: actions-runtime-audit
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    name: Inspect public repositories for legacy Action runtimes
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout trusted scanner without persisted credentials
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/scripts/actions-runtime-audit
+
+      - name: Set up Python
+        uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: .github/scripts/actions-runtime-audit/requirements.txt
+
+      - name: Install YAML parser and run offline regression tests
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python -m pip install --disable-pip-version-check -r .github/scripts/actions-runtime-audit/requirements.txt
+          python -m unittest discover -s .github/scripts/actions-runtime-audit -p 'test_*.py' -v
+
+      - name: Create read-only GitHub App installation token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.DOTNET_SDK_SYNC_APP_CLIENT_ID }}
+          private-key: ${{ secrets.DOTNET_SDK_SYNC_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          permission-contents: read
+          permission-metadata: read
+
+      - name: Audit eligible public repositories
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          set -Eeuo pipefail
+          python .github/scripts/actions-runtime-audit/scanner.py \
+            --owner "$OWNER" \
+            --policy .github/scripts/actions-runtime-audit/policy.json \
+            --output "$RUNNER_TEMP/actions-runtime-audit"
+
+      - name: Publish public-safe audit report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: actions-runtime-audit
+          path: ${{ runner.temp }}/actions-runtime-audit/report.*
+          if-no-files-found: warn
+          retention-days: 7

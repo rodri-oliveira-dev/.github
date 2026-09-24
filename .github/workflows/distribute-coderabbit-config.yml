@@ -70,7 +70,7 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
           sparse-checkout: |
-            .github/scripts/automation/distribute-coderabbit-config.sh
+            .github/scripts/automation
             coderabbit-templates
 
       - name: Create GitHub App token

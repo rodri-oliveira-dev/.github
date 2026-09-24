@@ -273,30 +273,36 @@ process_repository() {
   cp "$desired_file" "$worktree/$TARGET_PATH"
   git -C "$worktree" add -- "$TARGET_PATH"
 
+  local expected_branch_sha="$branch_sha"
+
   if git -C "$worktree" diff --cached --quiet -- "$TARGET_PATH"; then
-    LAST_ERROR="Unexpected state: synchronization produced no diff on the reserved branch."
-    return 1
-  fi
-
-  if ! git -C "$worktree" commit -m "$COMMIT_MESSAGE" > /dev/null 2> "$error_file"; then
-    LAST_ERROR="Unable to create synchronization commit: $(tr '\n' ' ' < "$error_file")"
-    return 1
-  fi
-
-  local expected_branch_sha
-  expected_branch_sha="$(git -C "$worktree" rev-parse HEAD)"
-
-  if [[ "$branch_exists" == "true" ]]; then
-    if ! git -C "$worktree" push origin "HEAD:refs/heads/$SYNC_BRANCH" \
-      --force-with-lease="refs/heads/$SYNC_BRANCH:$branch_sha" > /dev/null 2> "$error_file"; then
-      LAST_ERROR="Reserved branch changed after provenance validation or push was rejected: $(tr '\n' ' ' < "$error_file")"
-      return 1
+    if [[ "$branch_exists" == "true" ]]; then
+      echo "Existing automation Pull Request already contains the desired configuration: $repo"
+    else
+      printf '%s\t%s\tup-to-date-after-refresh\n' "$repo" "$template_name" >> "$NO_CHANGES_FILE"
+      echo "Default branch became up to date during synchronization: $repo"
+      return 0
     fi
   else
-    if ! git -C "$worktree" push origin "HEAD:refs/heads/$SYNC_BRANCH" \
-      --force-with-lease="refs/heads/$SYNC_BRANCH:" > /dev/null 2> "$error_file"; then
-      LAST_ERROR="Unable to create reserved branch safely: $(tr '\n' ' ' < "$error_file")"
+    if ! git -C "$worktree" commit -m "$COMMIT_MESSAGE" > /dev/null 2> "$error_file"; then
+      LAST_ERROR="Unable to create synchronization commit: $(tr '\n' ' ' < "$error_file")"
       return 1
+    fi
+
+    expected_branch_sha="$(git -C "$worktree" rev-parse HEAD)"
+
+    if [[ "$branch_exists" == "true" ]]; then
+      if ! git -C "$worktree" push origin "HEAD:refs/heads/$SYNC_BRANCH" \
+        --force-with-lease="refs/heads/$SYNC_BRANCH:$branch_sha" > /dev/null 2> "$error_file"; then
+        LAST_ERROR="Reserved branch changed after provenance validation or push was rejected: $(tr '\n' ' ' < "$error_file")"
+        return 1
+      fi
+    else
+      if ! git -C "$worktree" push origin "HEAD:refs/heads/$SYNC_BRANCH" \
+        --force-with-lease="refs/heads/$SYNC_BRANCH:" > /dev/null 2> "$error_file"; then
+        LAST_ERROR="Unable to create reserved branch safely: $(tr '\n' ' ' < "$error_file")"
+        return 1
+      fi
     fi
   fi
 

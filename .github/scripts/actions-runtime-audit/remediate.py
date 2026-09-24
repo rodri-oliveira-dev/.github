@@ -119,25 +119,6 @@ class Writer:
             raise AuditError("Write-enabled GitHub App token is required")
         self.token = token
 
-    def patch(self, path, data):
-        if not path.startswith("/") or path.startswith("//"):
-            raise AuditError("Invalid GitHub API path")
-        request = urllib.request.Request(
-            "https://api.github.com" + path,
-            data=json.dumps(data).encode("utf-8"),
-            headers={"Authorization": "Bearer " + self.token,
-                     "Accept": "application/vnd.github+json",
-                     "Content-Type": "application/json",
-                     "X-GitHub-Api-Version": "2022-11-28",
-                     "User-Agent": "actions-runtime-remediator"}, method="PATCH")
-        try:
-            with urllib.request.urlopen(request, timeout=30) as response:
-                return json.load(response)
-        except urllib.error.HTTPError as error:
-            raise AuditError(f"GitHub ref update rejected (HTTP {error.code})") from error
-        except urllib.error.URLError as error:
-            raise AuditError("GitHub write API unavailable") from error
-
     def post(self, path, data):
         if not path.startswith("/") or path.startswith("//"):
             raise AuditError("Invalid GitHub API path")
@@ -151,7 +132,10 @@ class Writer:
                      "User-Agent": "actions-runtime-remediator"}, method="POST")
         try:
             with urllib.request.urlopen(request, timeout=30) as response:
-                return json.load(response)
+                result = json.load(response)
+            if path == "/graphql" and isinstance(result, dict) and result.get("errors"):
+                raise AuditError("GitHub GraphQL mutation rejected")
+            return result
         except urllib.error.HTTPError as error:
             raise AuditError(f"GitHub write rejected (HTTP {error.code})") from error
         except urllib.error.URLError as error:
@@ -225,8 +209,24 @@ def remediate(api, writer, owner, report, policy):
                                  dict(message=AUTOMATION_COMMIT_MESSAGE,
                                       tree=new_tree, parents=[base]))["sha"]
             if branch_ref:
-                writer.patch(f"/repos/{name}/git/refs/heads/{branch}",
-                             dict(sha=commit, force=True))
+                before_oid = branch_ref.get("object", {}).get("sha")
+                repository_id = installed[name].get("node_id")
+                if not isinstance(before_oid, str) or not isinstance(repository_id, str) or not repository_id:
+                    raise AuditError("Missing branch or repository identity for compare-and-swap update")
+                writer.post("/graphql", {
+                    "query": (
+                        "mutation UpdateAutomationRef($repositoryId: ID!, $name: GitRefname!, "
+                        "$beforeOid: GitObjectID!, $afterOid: GitObjectID!) { "
+                        "updateRefs(input: {repositoryId: $repositoryId, refUpdates: [{name: $name, "
+                        "beforeOid: $beforeOid, afterOid: $afterOid, force: true}]}) { clientMutationId } }"
+                    ),
+                    "variables": {
+                        "repositoryId": repository_id,
+                        "name": "refs/heads/" + branch,
+                        "beforeOid": before_oid,
+                        "afterOid": commit,
+                    },
+                })
             else:
                 writer.post(f"/repos/{name}/git/refs", dict(ref="refs/heads/" + branch, sha=commit))
             description = "\n".join(f"- {c['file']}:{c['line']} {c['action']}: {c['old']} -> {c['version']} ({c['sha']})"

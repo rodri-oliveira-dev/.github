@@ -34,18 +34,19 @@ class RemediationAPI(FakeAPI):
         raise AssertionError(path)
 
 class FakeWriter:
-    def __init__(self):
+    def __init__(self, graphql_conflict=False):
         self.calls = []
-        self.patches = []
-    def patch(self, path, payload):
-        self.patches.append((path, payload))
-        return {}
+        self.graphql_conflict = graphql_conflict
     def post(self, path, payload):
         self.calls.append((path, payload))
         if path.endswith("/git/trees"):
             return {"sha": "e" * 40}
         if path.endswith("/git/commits"):
             return {"sha": "f" * 40}
+        if path == "/graphql":
+            if self.graphql_conflict:
+                raise AuditError("GitHub GraphQL mutation rejected")
+            return {"data": {"updateRefs": {"clientMutationId": None}}}
         if path.endswith("/pulls"):
             return {"html_url": "https://github.com/owner/demo/pull/1"}
         return {}
@@ -167,7 +168,6 @@ class RemediationTests(unittest.TestCase):
                            {"auto_fixes": TARGETS})
         self.assertEqual(second[0]["status"], "existing_pr")
         self.assertEqual(second_writer.calls, [])
-        self.assertEqual(second_writer.patches, [])
 
     def test_owned_stale_automation_branch_is_recycled(self):
         name = "owner/demo"
@@ -179,9 +179,13 @@ class RemediationTests(unittest.TestCase):
                            {"findings": [{"repository": name}]},
                            {"auto_fixes": TARGETS})
         self.assertEqual(result[0]["status"], "created")
-        self.assertEqual(writer.patches,
-                         [("/repos/owner/demo/git/refs/heads/automation/actions-node24",
-                           {"sha": "f" * 40, "force": True})])
+        graphql = [call for call in writer.calls if call[0] == "/graphql"]
+        self.assertEqual(len(graphql), 1)
+        variables = graphql[0][1]["variables"]
+        self.assertEqual(variables["repositoryId"], "R_test")
+        self.assertEqual(variables["name"], "refs/heads/" + AUTOMATION_BRANCH)
+        self.assertEqual(variables["beforeOid"], SHA)
+        self.assertEqual(variables["afterOid"], "f" * 40)
         self.assertEqual(writer.calls[-1][1]["head"], AUTOMATION_BRANCH)
 
     def test_unowned_automation_branch_requires_manual_review(self):
@@ -195,8 +199,21 @@ class RemediationTests(unittest.TestCase):
                            {"auto_fixes": TARGETS})
         self.assertEqual(result[0]["status"], "existing_branch")
         self.assertIn("manual review", result[0]["reason"].lower())
-        self.assertEqual(writer.patches, [])
         self.assertEqual(writer.calls, [])
+
+    def test_recycled_branch_movement_is_reported_as_error(self):
+        name = "owner/demo"
+        docs, workflow = docs_for()
+        api = RemediationAPI(docs, {(name, "c" * 40): tree(".github/workflows/ci.yml")},
+                             [repository(name)], branch_exists=True, branch_owned=True)
+        writer = FakeWriter(graphql_conflict=True)
+        result = remediate(api, writer, "owner",
+                           {"findings": [{"repository": name}]},
+                           {"auto_fixes": TARGETS})
+        self.assertEqual(result[0]["status"], "error")
+        self.assertIn("GraphQL mutation rejected", result[0]["reason"])
+        self.assertTrue(any(path == "/graphql" for path, _ in writer.calls))
+        self.assertFalse(any(path.endswith("/pulls") for path, _ in writer.calls))
 
     def test_quoted_uses_preserves_quote(self):
         line = '      - uses: "actions/checkout@v4" # v4\n'

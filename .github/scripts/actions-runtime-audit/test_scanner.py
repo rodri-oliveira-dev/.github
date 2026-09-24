@@ -25,9 +25,9 @@ class FakeAPI:
             raise AuditError("Missing YAML")
         return source, yaml.safe_load(source)
 
-def repository(name, private=False, archived=False, fork=False):
+def repository(name, private=False, archived=False, fork=False, node_id="R_test"):
     return dict(full_name=name, owner={"login": name.split("/")[0]}, default_branch="main",
-                private=private, archived=archived, fork=fork,
+                private=private, archived=archived, fork=fork, node_id=node_id,
                 visibility="private" if private else "public")
 
 def tree(*paths, truncated=False):

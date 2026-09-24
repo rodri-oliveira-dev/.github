@@ -13,6 +13,8 @@ PR_TITLE="${PR_TITLE:-chore: sincroniza configuração do CodeRabbit}"
 COMMIT_MESSAGE="${COMMIT_MESSAGE:-chore: sincroniza configuração do CodeRabbit}"
 OWNERSHIP_MARKER="<!-- automation-branch-owner: coderabbit-config-sync/v1 -->"
 DRY_RUN="${DRY_RUN:-false}"
+TOTAL_REPOSITORIES=0
+PROCESSED_REPOSITORIES=0
 
 TMP_DIR="$(mktemp -d)"
 RESULTS_FILE="$TMP_DIR/results.tsv"
@@ -369,6 +371,7 @@ write_summary() {
   {
     echo "## CodeRabbit configuration distribution"
     echo
+    echo "- Repositories processed: **$PROCESSED_REPOSITORIES/$TOTAL_REPOSITORIES**"
     echo "- Pull Requests open/updated: **$result_count**"
     echo "- Repositories without mutation: **$no_change_count**"
     echo "- Errors: **$error_count**"
@@ -402,11 +405,23 @@ write_summary() {
 
 validate_inputs
 
+TOTAL_REPOSITORIES="$(jq '[.templates[] | .[]] | length' "$MAPPING_FILE")"
+
+if ! gh auth setup-git > /dev/null 2> "$TMP_DIR/gh-auth-setup.log"; then
+  echo "::error::Unable to configure Git authentication for cross-repository pushes: $(tr '\n' ' ' < "$TMP_DIR/gh-auth-setup.log")"
+  exit 1
+fi
+
 while IFS=$'\t' read -r template_name repo; do
-  echo "::group::CodeRabbit sync - $repo ($template_name)"
+  PROCESSED_REPOSITORIES=$((PROCESSED_REPOSITORIES + 1))
+  echo "::group::[$PROCESSED_REPOSITORIES/$TOTAL_REPOSITORIES] CodeRabbit sync - $repo ($template_name)"
+  echo "Analyzing repository $PROCESSED_REPOSITORIES/$TOTAL_REPOSITORIES: $repo"
+
   if ! process_repository "$template_name" "$repo"; then
     record_error "$repo" "$template_name" "${LAST_ERROR:-Unknown error}"
   fi
+
+  echo "Completed repository $PROCESSED_REPOSITORIES/$TOTAL_REPOSITORIES: $repo"
   echo "::endgroup::"
 done < <(jq -r '.templates | to_entries[] | .key as $template | .value[] | [$template, .] | @tsv' "$MAPPING_FILE")
 

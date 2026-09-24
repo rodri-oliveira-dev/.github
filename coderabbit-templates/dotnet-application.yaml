@@ -26,6 +26,24 @@ reviews:
         - Avalie resiliência de integrações HTTP, filas e recursos externos, incluindo timeout, retry e idempotência.
         - Verifique logging estruturado, correlação, métricas e rastreabilidade de falhas.
         - Aponte consultas ineficientes, N+1, carregamento excessivo e riscos de performance.
+    - path: "MaiorDeIdade.Api/**/*.cs"
+      instructions: |
+        Revise como aplicação ou serviço .NET de produção.
+        - Verifique separação de responsabilidades, dependências entre camadas e limites arquiteturais.
+        - Avalie lifetimes de DI, async/await, CancellationToken, concorrência e descarte de recursos.
+        - Verifique autenticação, autorização, validação de entrada, exposição de dados e tratamento de exceções.
+        - Avalie resiliência de integrações HTTP, filas e recursos externos, incluindo timeout, retry e idempotência.
+        - Verifique logging estruturado, correlação, métricas e rastreabilidade de falhas.
+        - Aponte consultas ineficientes, N+1, carregamento excessivo e riscos de performance.
+    - path: "MaiorDeIdade/**/*.cs"
+      instructions: |
+        Revise como aplicação ou serviço .NET de produção.
+        - Verifique separação de responsabilidades, dependências entre camadas e limites arquiteturais.
+        - Avalie lifetimes de DI, async/await, CancellationToken, concorrência e descarte de recursos.
+        - Verifique autenticação, autorização, validação de entrada, exposição de dados e tratamento de exceções.
+        - Avalie resiliência de integrações HTTP, filas e recursos externos, incluindo timeout, retry e idempotência.
+        - Verifique logging estruturado, correlação, métricas e rastreabilidade de falhas.
+        - Aponte consultas ineficientes, N+1, carregamento excessivo e riscos de performance.
     - path: "**/Migrations/**"
       instructions: |
         Verifique compatibilidade para frente e para trás, risco de perda de dados,
@@ -39,6 +57,9 @@ reviews:
         Verifique imagem base, usuário não root, redução de superfície de ataque,
         reprodutibilidade, exposição de secrets e tamanho desnecessário da imagem.
     - path: "**/compose*.yml"
+      instructions: |
+        Verifique redes, portas, volumes, health checks, secrets e consistência entre dependências.
+    - path: "**/compose*.yaml"
       instructions: |
         Verifique redes, portas, volumes, health checks, secrets e consistência entre dependências.
     - path: ".github/workflows/**"

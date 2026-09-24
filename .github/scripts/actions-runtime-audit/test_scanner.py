@@ -3,7 +3,8 @@ import json
 import unittest
 from pathlib import Path
 import yaml
-from scanner import API, AuditError, Scanner, workflow_uses, markdown
+from scanner import (API, AuditError, Scanner, workflow_use_locations,
+                     workflow_uses, markdown)
 from scope import repository_scope
 
 POLICY = json.loads((Path(__file__).parent / "policy.json").read_text())
@@ -37,6 +38,33 @@ class AuditTests(unittest.TestCase):
     def test_structural_uses_ignores_shell(self):
         doc = yaml.safe_load('jobs:\n  x:\n    steps:\n      - run: |\n          echo "uses: bad/action@v1"\n      - uses: actions/checkout@v4\n')
         self.assertEqual(list(workflow_uses(doc)), ["actions/checkout@v4"])
+
+    def test_aliased_workflow_uses_keep_alias_occurrence_line(self):
+        source = ("shared: &shared actions/checkout@v4\n"
+                  "jobs:\n"
+                  "  first:\n"
+                  "    uses: *shared\n"
+                  "  second:\n"
+                  "    uses: *shared\n")
+        self.assertEqual(list(workflow_use_locations(source)),
+                         [("actions/checkout@v4", 4),
+                          ("actions/checkout@v4", 6)])
+
+    def test_repeated_identical_action_references_keep_distinct_lines(self):
+        name = "rodrigo/demo"
+        source = ("jobs:\n  x:\n    steps:\n"
+                  "      - uses: actions/upload-artifact@v4\n"
+                  "      - uses: actions/upload-artifact@v4\n"
+                  "      - uses: actions/upload-artifact@v4\n")
+        docs = {
+            (name, ".github/workflows/ci.yml", "main"): source,
+            ("actions/upload-artifact", "action.yml", "v4"): "runs:\n  using: node20\n",
+        }
+        result = Scanner(FakeAPI(docs, {(name, "main"): tree(".github/workflows/ci.yml")},
+                                 [repository(name)]), POLICY).run("rodrigo")
+        findings = [item for item in result["findings"]
+                    if item["action"] == "actions/upload-artifact@v4"]
+        self.assertEqual([item["line"] for item in findings], [4, 5, 6])
 
     def test_pinned_sha_uses_manifest_not_version_comment(self):
         sha = "a" * 40

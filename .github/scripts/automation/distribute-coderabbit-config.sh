@@ -236,69 +236,68 @@ process_repository() {
     return 1
   fi
 
-  local created_branch="false"
-  if [[ "$branch_exists" == "false" ]]; then
-    local base_sha
-    if ! base_sha="$(gh api "repos/$repo/commits/$base_branch" --jq '.sha' 2> "$error_file")"; then
-      LAST_ERROR="Unable to resolve default branch head: $(tr '\n' ' ' < "$error_file")"
-      return 1
-    fi
+  local worktree="$TMP_DIR/worktree"
+  rm -rf "$worktree"
 
-    if ! gh api --method POST "repos/$repo/git/refs" \
-      -f ref="refs/heads/$SYNC_BRANCH" \
-      -f sha="$base_sha" > /dev/null 2> "$error_file"; then
-      LAST_ERROR="Unable to create reserved branch: $(tr '\n' ' ' < "$error_file")"
-      return 1
-    fi
-    created_branch="true"
+  if ! gh repo clone "$repo" "$worktree" -- --filter=blob:none --no-tags > /dev/null 2> "$error_file"; then
+    LAST_ERROR="Unable to clone repository for a safe update: $(tr '\n' ' ' < "$error_file")"
+    return 1
   fi
 
-  local branch_file_exists="false"
-  local branch_file_sha=""
-  local branch_content=""
-  if api_get_optional "repos/$repo/contents/$TARGET_PATH?ref=$SYNC_BRANCH" "$branch_file_json" "$error_file"; then
-    branch_file_exists="true"
-    branch_file_sha="$(jq -r '.sha' "$branch_file_json")"
-    if ! branch_content="$(jq -r '.content' "$branch_file_json" | tr -d '\n' | base64 --decode 2> "$error_file")"; then
-      LAST_ERROR="Unable to decode $TARGET_PATH from reserved branch: $(tr '\n' ' ' < "$error_file")"
+  git -C "$worktree" config user.name "github-actions[bot]"
+  git -C "$worktree" config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+  if [[ "$branch_exists" == "true" ]]; then
+    if ! git -C "$worktree" fetch origin "refs/heads/$SYNC_BRANCH:refs/remotes/origin/$SYNC_BRANCH" > /dev/null 2> "$error_file"; then
+      LAST_ERROR="Unable to fetch reserved branch: $(tr '\n' ' ' < "$error_file")"
+      return 1
+    fi
+
+    local fetched_branch_sha
+    fetched_branch_sha="$(git -C "$worktree" rev-parse "refs/remotes/origin/$SYNC_BRANCH")"
+    if [[ "$fetched_branch_sha" != "$branch_sha" ]]; then
+      LAST_ERROR="Reserved branch changed after provenance validation."
+      return 1
+    fi
+
+    git -C "$worktree" switch --detach "$fetched_branch_sha" > /dev/null 2>&1
+    git -C "$worktree" switch -c "$SYNC_BRANCH" > /dev/null 2>&1
+  else
+    if [[ "$(git -C "$worktree" branch --show-current)" != "$base_branch" ]]; then
+      LAST_ERROR="Clone did not resolve the expected default branch '$base_branch'."
+      return 1
+    fi
+    git -C "$worktree" switch -c "$SYNC_BRANCH" > /dev/null 2>&1
+  fi
+
+  cp "$desired_file" "$worktree/$TARGET_PATH"
+  git -C "$worktree" add -- "$TARGET_PATH"
+
+  if git -C "$worktree" diff --cached --quiet -- "$TARGET_PATH"; then
+    LAST_ERROR="Unexpected state: synchronization produced no diff on the reserved branch."
+    return 1
+  fi
+
+  if ! git -C "$worktree" commit -m "$COMMIT_MESSAGE" > /dev/null 2> "$error_file"; then
+    LAST_ERROR="Unable to create synchronization commit: $(tr '\n' ' ' < "$error_file")"
+    return 1
+  fi
+
+  local expected_branch_sha
+  expected_branch_sha="$(git -C "$worktree" rev-parse HEAD)"
+
+  if [[ "$branch_exists" == "true" ]]; then
+    if ! git -C "$worktree" push origin "HEAD:refs/heads/$SYNC_BRANCH" \
+      --force-with-lease="refs/heads/$SYNC_BRANCH:$branch_sha" > /dev/null 2> "$error_file"; then
+      LAST_ERROR="Reserved branch changed after provenance validation or push was rejected: $(tr '\n' ' ' < "$error_file")"
       return 1
     fi
   else
-    local optional_status=$?
-    if (( optional_status == 1 )); then
-      LAST_ERROR="Unable to read $TARGET_PATH from reserved branch: $LAST_ERROR"
+    if ! git -C "$worktree" push origin "HEAD:refs/heads/$SYNC_BRANCH" \
+      --force-with-lease="refs/heads/$SYNC_BRANCH:" > /dev/null 2> "$error_file"; then
+      LAST_ERROR="Unable to create reserved branch safely: $(tr '\n' ' ' < "$error_file")"
       return 1
     fi
-  fi
-
-  local expected_branch_sha=""
-  if [[ "$branch_file_exists" == "false" || "$branch_content" != "$desired_content" ]]; then
-    local encoded_content
-    encoded_content="$(base64 -w 0 "$desired_file")"
-
-    local -a api_args=(
-      --method PUT
-      "repos/$repo/contents/$TARGET_PATH"
-      -f "message=$COMMIT_MESSAGE"
-      -f "content=$encoded_content"
-      -f "branch=$SYNC_BRANCH"
-    )
-
-    if [[ "$branch_file_exists" == "true" ]]; then
-      api_args+=( -f "sha=$branch_file_sha" )
-    fi
-
-    local update_json="$TMP_DIR/update.json"
-    if ! gh api "${api_args[@]}" > "$update_json" 2> "$error_file"; then
-      LAST_ERROR="Unable to update $TARGET_PATH: $(tr '\n' ' ' < "$error_file")"
-      return 1
-    fi
-    expected_branch_sha="$(jq -r '.commit.sha' "$update_json")"
-  else
-    expected_branch_sha="$(gh api "repos/$repo/git/ref/heads/$SYNC_BRANCH" --jq '.object.sha' 2> "$error_file")" || {
-      LAST_ERROR="Unable to resolve reserved branch after update."
-      return 1
-    }
   fi
 
   local pr_url status

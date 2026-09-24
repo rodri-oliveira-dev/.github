@@ -218,7 +218,7 @@ def remediate(api, writer, owner, report, policy):
                     outcomes.append(dict(repository=name, status="existing_branch", branch=branch,
                                          reason="Automation branch exists but is not safely attributable to this automation; manual review required"))
                     continue
-                writer.delete(f"/repos/{name}/git/refs/heads/{urllib.parse.quote(branch, safe='')}")
+                writer.delete(f"/repos/{name}/git/refs/heads/{branch}")
             parent_tree = api.get(f"/repos/{name}/git/commits/{base}")["tree"]["sha"]
             new_tree = writer.post(f"/repos/{name}/git/trees", dict(base_tree=parent_tree, tree=files))["sha"]
             commit = writer.post(f"/repos/{name}/git/commits",

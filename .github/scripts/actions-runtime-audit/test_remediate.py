@@ -178,7 +178,7 @@ class RemediationTests(unittest.TestCase):
                            {"auto_fixes": TARGETS})
         self.assertEqual(result[0]["status"], "created")
         self.assertEqual(writer.deletes,
-                         ["/repos/owner/demo/git/refs/heads/automation%2Factions-node24"])
+                         ["/repos/owner/demo/git/refs/heads/automation/actions-node24"])
         self.assertEqual(writer.calls[-1][1]["head"], AUTOMATION_BRANCH)
 
     def test_unowned_automation_branch_requires_manual_review(self):

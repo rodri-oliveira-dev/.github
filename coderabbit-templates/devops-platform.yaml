@@ -1,0 +1,42 @@
+language: "pt-BR"
+tone_instructions: "Seja técnico, objetivo e acionável. Priorize segurança, least privilege, idempotência, supply chain, rollback e risco operacional."
+reviews:
+  profile: "assertive"
+  request_changes_workflow: false
+  high_level_summary: true
+  review_status: true
+  review_details: true
+  poem: false
+  auto_review:
+    enabled: true
+    drafts: false
+  path_filters:
+    - "!**/.terraform/**"
+    - "!**/*.tfstate"
+    - "!**/*.tfstate.backup"
+  path_instructions:
+    - path: "**/*.tf"
+      instructions: |
+        Verifique least privilege, exposição pública acidental, criptografia, IAM, secrets,
+        dependências entre recursos, lifecycle, destruição involuntária e drift.
+        Avalie idempotência, composição de módulos, outputs sensíveis e mudanças com impacto destrutivo.
+    - path: "**/*.tfvars"
+      instructions: |
+        Procure credenciais, tokens, dados sensíveis e valores que deveriam estar em secret stores ou variáveis externas.
+    - path: "**/*.sh"
+      instructions: |
+        Verifique quoting, set -euo pipefail quando apropriado, idempotência,
+        portabilidade, tratamento de erro, permissões e segurança na manipulação de caminhos e entrada externa.
+    - path: ".github/workflows/**"
+      instructions: |
+        Verifique permissions mínimas, secrets, pull_request_target, execução de código não confiável,
+        pinning imutável quando apropriado, artefatos, cache poisoning, ambientes e supply chain.
+    - path: "**/Dockerfile*"
+      instructions: |
+        Verifique imagem base, usuário não root, secrets em layers, versões,
+        superfície de ataque, reprodutibilidade e health checks quando aplicável.
+    - path: "**/*.md"
+      instructions: |
+        Verifique runbooks, procedimentos de instalação, rollback, segurança e requisitos operacionais.
+chat:
+  auto_reply: true

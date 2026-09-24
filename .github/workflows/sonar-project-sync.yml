@@ -1,6 +1,12 @@
 name: Sync Sonar issues to project
 
 on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/sonar-project-sync.yml"
+      - ".github/scripts/automation/sonar-project-sync.sh"
   schedule:
     # 06:00 America/Sao_Paulo (09:00 UTC), daily.
     - cron: "0 9 * * *"

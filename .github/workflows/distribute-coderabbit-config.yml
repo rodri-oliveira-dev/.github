@@ -28,7 +28,7 @@ concurrency:
 jobs:
   distribute:
     name: Synchronize .coderabbit.yaml across mapped repositories
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.RUNNER_OS || 'ubuntu-26.04' }}
     timeout-minutes: 45
 
     steps:

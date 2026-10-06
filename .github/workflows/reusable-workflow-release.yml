@@ -22,7 +22,7 @@ jobs:
   release:
     name: Publish reviewed control plane release
     if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.RUNNER_OS || 'ubuntu-26.04' }}
     timeout-minutes: 10
     permissions:
       contents: write

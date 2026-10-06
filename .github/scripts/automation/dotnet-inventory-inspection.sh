@@ -39,13 +39,19 @@ trap cleanup EXIT
 run_bounded_command() {
   local seconds="$1" stdout_file="$2" stderr_file="$3" diagnostics_file="$4"
   shift 4
-  local result=0
+  local result=0 command_group_file="${diagnostics_file}.pgid" command_group=""
   BOUNDED_COMMAND_TIMED_OUT=false
   : > "$diagnostics_file"
+  : > "$command_group_file"
 
   if LC_ALL=C timeout --verbose --signal=TERM --kill-after=10s "${seconds}s" \
-    bash -c 'out="$1"; err="$2"; shift 2; exec "$@" > "$out" 2> "$err"' \
-      bash "$stdout_file" "$stderr_file" "$@" 2> "$diagnostics_file"; then
+    bash -c '
+      out="$1"; err="$2"; group_file="$3"; shift 3
+      setsid --wait "$@" > "$out" 2> "$err" &
+      command_group=$!
+      printf "%s\\n" "$command_group" > "$group_file"
+      wait "$command_group"
+    ' bash "$stdout_file" "$stderr_file" "$command_group_file" "$@" 2> "$diagnostics_file"; then
     result=0
   else
     result=$?
@@ -54,6 +60,22 @@ run_bounded_command() {
   if grep -Fq 'timeout: sending signal TERM to command' "$diagnostics_file"; then
     BOUNDED_COMMAND_TIMED_OUT=true
   fi
+
+  if [[ "$BOUNDED_COMMAND_TIMED_OUT" == "true" && -s "$command_group_file" ]]; then
+    command_group="$(cat "$command_group_file")"
+    if [[ "$command_group" =~ ^[0-9]+$ ]]; then
+      kill -TERM -- "-$command_group" 2>/dev/null || true
+      for _ in {1..20}; do
+        if ! kill -0 -- "-$command_group" 2>/dev/null; then
+          break
+        fi
+        sleep 0.05
+      done
+      kill -KILL -- "-$command_group" 2>/dev/null || true
+    fi
+  fi
+
+  rm -f -- "$command_group_file"
   return "$result"
 }
 

@@ -22,7 +22,7 @@ concurrency:
 jobs:
   audit:
     name: Inspect public repositories for legacy Action runtimes
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.RUNNER_OS || 'ubuntu-26.04' }}
     timeout-minutes: 120
     permissions:
       contents: read
@@ -82,7 +82,7 @@ jobs:
     name: Create draft remediation PRs (manual opt-in)
     if: github.event_name == 'workflow_dispatch' && inputs.apply_fixes == true
     needs: audit
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.RUNNER_OS || 'ubuntu-26.04' }}
     timeout-minutes: 120
     permissions:
       contents: read

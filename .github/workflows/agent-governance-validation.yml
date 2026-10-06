@@ -186,12 +186,769 @@ jobs:
           grep -Fq 'bash "$GITHUB_ACTION_PATH/check.sh"' "$size_action"
           grep -Fq 'result=coverage-failure' "$size_policy"
           grep -Fq 'git rev-list --objects "$LOG_OPTS"' "$size_policy"
-          grep -Fq "uses: rodri-oliveira-dev/.github/.github/actions/secret-scan-size-policy@5ae843478916f63237244c94c02c5be89c07ba7f" "$scanner"
           grep -Fq -- '--max-target-megabytes 20' "$scanner"
-          grep -Fq "uses: rodri-oliveira-dev/.github/.github/workflows/reusable-secret-scan.yml@5ae843478916f63237244c94c02c5be89c07ba7f" "$caller"
 
-          if grep -Eq 'uses: .*reusable-secret-scan\.yml@(main|master|[^0-9a-f]|$)' "$caller"; then
-            echo "::error::Control-plane secret scan must pin the reusable workflow to an immutable commit SHA."
+          if ! grep -Eq '^[[:space:]]*uses: rodri-oliveira-dev/.github/.github/actions/secret-scan-size-policy@[0-9a-f]{40}[[:space:]]*
+
+          fixture_root="$(mktemp -d)"
+          trap 'rm -rf "$fixture_root"' EXIT
+
+          init_repo() {
+            local path="$1"
+            git init --quiet "$path"
+            git -C "$path" config user.name fixture
+            git -C "$path" config user.email fixture@example.invalid
+          }
+
+          large_repo="$fixture_root/large"
+          init_repo "$large_repo"
+
+          dd if=/dev/zero of="$large_repo/oversized.fixture" bs=1M count=21 status=none
+          printf '%s%s\n' 'gh' 'p_abcdefghijklmnopqrstuvwxyz0123456789ABCD' >> "$large_repo/oversized.fixture"
+          grep -aFq 'ghp_abcdefghijklmnopqrstuvwxyz0123456789ABCD' "$large_repo/oversized.fixture"
+
+          git -C "$large_repo" add oversized.fixture
+          git -C "$large_repo" commit --quiet -m 'large secret fixture'
+
+          large_output="$fixture_root/large-output"
+          large_summary="$fixture_root/large-summary"
+          (
+            cd "$large_repo"
+            GITHUB_OUTPUT="$large_output" \
+            GITHUB_STEP_SUMMARY="$large_summary" \
+            LOG_OPTS="--all" \
+            MAX_TARGET_MEGABYTES="20" \
+              bash "$GITHUB_WORKSPACE/$size_policy"
+          )
+
+          grep -Fxq 'result=coverage-failure' "$large_output"
+          oversized_count="$(sed -n 's/^oversized-count=//p' "$large_output")"
+          [[ "$oversized_count" -ge 1 ]]
+          grep -Fq 'Secret scan size coverage' "$large_summary"
+          grep -Fq 'A clean scanner result would not prove complete coverage.' "$large_summary"
+
+          small_repo="$fixture_root/small"
+          init_repo "$small_repo"
+          printf 'safe fixture\n' > "$small_repo/small.txt"
+          git -C "$small_repo" add small.txt
+          git -C "$small_repo" commit --quiet -m 'small fixture'
+
+          small_output="$fixture_root/small-output"
+          small_summary="$fixture_root/small-summary"
+          (
+            cd "$small_repo"
+            GITHUB_OUTPUT="$small_output" \
+            GITHUB_STEP_SUMMARY="$small_summary" \
+            LOG_OPTS="--all" \
+            MAX_TARGET_MEGABYTES="20" \
+              bash "$GITHUB_WORKSPACE/$size_policy"
+          )
+
+          grep -Fxq 'result=covered' "$small_output"
+          grep -Fxq 'oversized-count=0' "$small_output"
+          grep -Fq 'All tracked Git blobs in the selected scan scope are within the scanner size limit.' "$small_summary"
+
+
+      - name: Validate .NET SDK refresh policy
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          policy=".github/scripts/dotnet-sdk-sync-policy.sh"
+          sdk=".github/scripts/automation/dotnet-sdk-sync.sh"
+
+          bash -n "$policy"
+          source "$policy"
+
+          # Strict stable numeric versions only.
+          validate_stable_sdk_version "10.0.102" "fixture"
+          if validate_stable_sdk_version "10.0.x" "fixture"; then
+            echo "::error::Malformed SDK version was incorrectly accepted."
+            exit 1
+          fi
+          grep -Fq "stable numeric major.minor.patch" <<< "$SDK_POLICY_ERROR"
+
+          if validate_sdk_pair "10.0.101" "9.0.300"; then
+            echo "::error::Cross-channel SDK transition was incorrectly accepted."
+            exit 1
+          fi
+          grep -Fq "same major.minor channel" <<< "$SDK_POLICY_ERROR"
+
+          # No PR / new PR path: default branch needs an update.
+          sdk_update_relation "10.0.100" "10.0.102"
+          [[ "$SDK_UPDATE_RELATION" == "update" ]]
+
+          # Existing PR already current: formatting is irrelevant; sdk.version controls idempotency.
+          current_pr_json='{ "sdk": { "rollForward": "latestPatch", "version": "10.0.102" } }'
+          current_pr_version="$(jq -r '.sdk.version' <<< "$current_pr_json")"
+          sdk_update_relation "$current_pr_version" "10.0.102"
+          [[ "$SDK_UPDATE_RELATION" == "current" ]]
+
+          # Existing PR is stale and must be refreshed to the latest eligible patch.
+          stale_pr_json=$'{\n  "sdk": {\n    "version": "10.0.101"\n  }\n}'
+          stale_pr_version="$(jq -r '.sdk.version' <<< "$stale_pr_json")"
+          sdk_update_relation "$stale_pr_version" "10.0.102"
+          [[ "$SDK_UPDATE_RELATION" == "update" ]]
+
+          # Never downgrade an automation branch that is already newer than release metadata.
+          sdk_update_relation "10.0.103" "10.0.102"
+          [[ "$SDK_UPDATE_RELATION" == "newer" ]]
+
+          # Workflow contract: validated before mutation, existing PR is edited, and CAS lease is preserved.
+          grep -Fq 'source "$SDK_POLICY"' "$sdk"
+          grep -Fq 'validate_stable_sdk_version "$current" "Current SDK"' "$sdk"
+          grep -Fq 'sdk_update_relation "$current" "$latest"' "$sdk"
+          grep -Fq 'sdk_update_relation "$branch_version" "$latest"' "$sdk"
+          grep -Fq 'PR #$AUTOMATION_PR_NUMBER already proposes latest SDK $latest' "$sdk"
+          grep -Fq 'gh pr edit "$pr_number"' "$sdk"
+          grep -Fq -- '--force-with-lease="refs/heads/$UPDATE_BRANCH:$branch_parent_sha"' "$sdk"
+          grep -Fq 'pull_requests_updated=$((pull_requests_updated + 1))' "$sdk"
+          grep -Fq -- '--data-urlencode "ref=$default_sha"' "$sdk"
+          grep -Fq 'sdk_update_relation "$exact_source_version" "$latest"' "$sdk"
+          grep -Fq 'reconcile_existing_pr_metadata()' "$sdk"
+          grep -Fq '[[ "$current_title" == "$desired_title" && "$current_body" == "$desired_body" ]]' "$sdk"
+          grep -Fq 'RECONCILED_PR_CHANGED="true"' "$sdk"
+
+          exact_validation_line="$(grep -n -E '^[[:space:]]*if ! sdk_update_relation "\$exact_source_version" "\$latest"; then[[:space:]]*$' "$sdk" | head -n 1 | cut -d: -f1)"
+          branch_creation_line="$(grep -n -F '"repos/$repo/git/refs"' "$sdk" | head -n 1 | cut -d: -f1)"
+          if [[ -z "$exact_validation_line" || -z "$branch_creation_line" || "$exact_validation_line" -ge "$branch_creation_line" ]]; then
+            echo "::error::The exact default-branch SDK source must be validated before creating the reserved automation branch."
+            exit 1
+          fi
+
+          reconcile_calls="$(grep -Fc 'reconcile_existing_pr_metadata "$repo" "$AUTOMATION_PR_NUMBER" "$desired_pr_title" "$pr_body"' "$sdk")"
+          if [[ "$reconcile_calls" -lt 2 ]]; then
+            echo "::error::Existing PR metadata must be reconciled both on the no-op/current path and after a branch refresh."
+            exit 1
+          fi
+
+          metadata_guard_line="$(grep -n -F '[[ "$current_title" == "$desired_title" && "$current_body" == "$desired_body" ]]' "$sdk" | head -n 1 | cut -d: -f1)"
+          metadata_edit_line="$(grep -n -F 'gh pr edit "$pr_number"' "$sdk" | head -n 1 | cut -d: -f1)"
+          if [[ -z "$metadata_guard_line" || -z "$metadata_edit_line" || "$metadata_guard_line" -ge "$metadata_edit_line" ]]; then
+            echo "::error::PR metadata must be compared before gh pr edit is invoked."
+            exit 1
+          fi
+
+          if grep -Fq '[[ "$branch_content" == "$updated_content" ]]' "$sdk"; then
+            echo "::error::SDK refresh idempotency must compare sdk.version semantically, not raw JSON formatting."
+            exit 1
+          fi
+
+      - name: Validate cross-repository batch failure isolation
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          for script in .github/scripts/batch-retry.sh .github/scripts/test-batch-failure-isolation.sh; do
+            bash -n "$script"
+          done
+
+          # Bash components are versioned separately from the workflow wrappers.
+          for script in .github/scripts/automation/*.sh; do
+            bash -n "$script"
+          done
+
+          bash .github/scripts/test-batch-failure-isolation.sh
+          bash .github/scripts/test-automation-extraction.sh
+
+      - name: Validate inventory timeout and process-group cancellation
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          bash -n .github/scripts/test-inventory-timeout.sh
+          bash .github/scripts/test-inventory-timeout.sh
+
+      - name: Validate automation branch ownership policy
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          policy=".github/scripts/automation-branch-ownership.sh"
+          sdk=".github/scripts/automation/dotnet-sdk-sync.sh"
+          upstream=".github/scripts/automation/sync-agent-skills.sh"
+          distribution=".github/scripts/automation/distribute-agent-skills.sh"
+
+          bash -n "$policy"
+          grep -Fq 'verify_automation_branch_ownership' "$sdk"
+          grep -Fq 'verify_automation_branch_ownership' "$upstream"
+          grep -Fq 'verify_automation_branch_ownership' "$distribution"
+          grep -Fq '<!-- automation-branch-owner: dotnet-sdk-sync/v1 -->' "$sdk"
+          grep -Fq '<!-- automation-branch-owner: sync-upstream-agent-skills/v1 -->' "$upstream"
+          grep -Fq '<!-- automation-branch-owner: distribute-agent-skills/v1 -->' "$distribution"
+          grep -Fq 'reconcile_existing_pr_metadata "$repo" "$AUTOMATION_PR_NUMBER" "$desired_pr_title" "$pr_body"' "$sdk"
+          grep -Fq 'branch_parent_sha="$AUTOMATION_BRANCH_SHA"' "$sdk"
+          grep -Fq 'sdk_worktree="$(mktemp -d)"' "$sdk"
+          grep -Fq -- '--force-with-lease="refs/heads/$UPDATE_BRANCH:$branch_parent_sha"' "$sdk"
+          grep -Fq 'origin "HEAD:refs/heads/$UPDATE_BRANCH"' "$sdk"
+
+          if grep -Fq -- '--method PATCH' "$sdk"; then
+            echo "::error::SDK sync must use an exact-head lease instead of ancestry-only ref PATCH semantics."
+            exit 1
+          fi
+
+          if grep -Fq -- '--method DELETE' "$sdk"; then
+            echo "::error::SDK sync must not delete a reserved branch based only on its name."
+            exit 1
+          fi
+
+          grep -Fq -- '--force-with-lease="refs/heads/$SYNC_BRANCH:$AUTOMATION_BRANCH_SHA"' "$upstream"
+          grep -Fq -- '--force-with-lease="refs/heads/$SYNC_BRANCH:"' "$upstream"
+          grep -Fq -- '--force-with-lease="refs/heads/$SYNC_BRANCH:$AUTOMATION_BRANCH_SHA"' "$distribution"
+          grep -Fq -- '--force-with-lease="refs/heads/$SYNC_BRANCH:"' "$distribution"
+
+          fake_bin="$(mktemp -d)"
+          race_root="$(mktemp -d)"
+          trap 'rm -rf "$fake_bin" "$race_root"' EXIT
+
+          cat > "$fake_bin/gh" <<'SH'
+          #!/usr/bin/env bash
+          set -Eeuo pipefail
+          case "$*" in
+            *"/git/matching-refs/"*)
+              printf '%s\n' "${FAKE_REFS_JSON:-[]}"
+              ;;
+            *"/pulls"*)
+              printf '%s\n' "${FAKE_PRS_JSON:-[]}"
+              ;;
+            *)
+              echo "unexpected fake gh invocation: $*" >&2
+              exit 1
+              ;;
+          esac
+          SH
+          chmod +x "$fake_bin/gh"
+          export PATH="$fake_bin:$PATH"
+
+          source "$policy"
+
+          fixture_repo="rodri-oliveira-dev/fixture"
+          fixture_branch="chore/fixture-automation"
+          fixture_base="main"
+          fixture_title="chore: fixture automation"
+          fixture_marker="<!-- automation-branch-owner: fixture/v1 -->"
+          owned_sha="1111111111111111111111111111111111111111"
+
+          FAKE_REFS_JSON="$(
+            jq -cn \
+              --arg ref "refs/heads/$fixture_branch" \
+              --arg sha "$owned_sha" \
+              '[{ref:$ref, object:{sha:$sha}}]'
+          )"
+          export FAKE_REFS_JSON
+
+          FAKE_PRS_JSON="$(
+            jq -cn \
+              --arg repo "$fixture_repo" \
+              --arg branch "$fixture_branch" \
+              --arg base "$fixture_base" \
+              --arg sha "$owned_sha" \
+              --arg title "$fixture_title" \
+              --arg body "$fixture_marker" \
+              '[{
+                number:42,
+                html_url:"https://github.com/example/example/pull/42",
+                title:$title,
+                body:$body,
+                head:{sha:$sha, ref:$branch, repo:{full_name:$repo}},
+                base:{ref:$base}
+              }]'
+          )"
+          export FAKE_PRS_JSON
+
+          verify_automation_branch_ownership \
+            "$fixture_repo" "$fixture_branch" "$fixture_base" "$fixture_marker" "$fixture_title"
+          [[ "$AUTOMATION_BRANCH_STATE" == "owned" ]]
+          [[ "$AUTOMATION_BRANCH_SHA" == "$owned_sha" ]]
+          [[ "$AUTOMATION_PR_NUMBER" == "42" ]]
+
+          export FAKE_PRS_JSON='[]'
+          if verify_automation_branch_ownership \
+            "$fixture_repo" "$fixture_branch" "$fixture_base" "$fixture_marker" "$fixture_title"; then
+            echo "::error::A human/unproven branch using the reserved name was incorrectly accepted."
+            exit 1
+          fi
+          grep -Fq 'ownership is unproven' <<< "$AUTOMATION_OWNERSHIP_ERROR"
+
+          export FAKE_REFS_JSON='[]'
+          export FAKE_PRS_JSON='[]'
+          verify_automation_branch_ownership \
+            "$fixture_repo" "$fixture_branch" "$fixture_base" "$fixture_marker" "$fixture_title"
+          [[ "$AUTOMATION_BRANCH_STATE" == "absent" ]]
+
+          remote="$race_root/remote.git"
+          seed="$race_root/seed"
+          racer="$race_root/racer"
+          git init --quiet --bare "$remote"
+          git clone --quiet "$remote" "$seed"
+          git -C "$seed" config user.name fixture
+          git -C "$seed" config user.email fixture@example.invalid
+          echo base > "$seed/file.txt"
+          git -C "$seed" add file.txt
+          git -C "$seed" commit --quiet -m base
+          git -C "$seed" push --quiet origin HEAD:main
+          git -C "$seed" checkout --quiet -b "$fixture_branch"
+          echo owned >> "$seed/file.txt"
+          git -C "$seed" commit --quiet -am owned
+          git -C "$seed" push --quiet origin "HEAD:refs/heads/$fixture_branch"
+
+          captured_sha="$(git ls-remote "$remote" "refs/heads/$fixture_branch" | awk '{print $1}')"
+          echo candidate >> "$seed/file.txt"
+          git -C "$seed" commit --quiet -am candidate
+
+          git clone --quiet --branch "$fixture_branch" "$remote" "$racer"
+          git -C "$racer" config user.name racer
+          git -C "$racer" config user.email racer@example.invalid
+          echo race >> "$racer/file.txt"
+          git -C "$racer" commit --quiet -am race
+          git -C "$racer" push --quiet origin "HEAD:refs/heads/$fixture_branch"
+
+          if git -C "$seed" push --quiet \
+            --force-with-lease="refs/heads/$fixture_branch:$captured_sha" \
+            origin "HEAD:refs/heads/$fixture_branch" 2>/dev/null; then
+            echo "::error::A stale force-with-lease unexpectedly overwrote a branch changed after SHA capture."
+            exit 1
+          fi
+
+          ancestor_sha="$(git -C "$seed" rev-parse "$captured_sha^")"
+          git --git-dir="$remote" update-ref "refs/heads/$fixture_branch" "$ancestor_sha"
+
+          if git -C "$seed" push --quiet \
+            --force-with-lease="refs/heads/$fixture_branch:$captured_sha" \
+            origin "HEAD:refs/heads/$fixture_branch" 2>/dev/null; then
+            echo "::error::A stale exact-head lease unexpectedly overwrote a branch reset to an ancestor."
+            exit 1
+          fi
+
+      - name: Validate upstream skill sync contract
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          sync=".github/scripts/automation/sync-agent-skills.sh"
+          sync_workflow=".github/workflows/sync-agent-skills.yml"
+
+          grep -Fq 'cron: "20 12 * * 1"' "$sync_workflow"
+          grep -Fq 'SOURCE_REPO: rodri-oliveira-dev/dotnet-library-template' "$sync_workflow"
+          grep -Fq 'readonly SYNC_BRANCH="chore/sync-upstream-agent-skills"' "$sync"
+          grep -Fq 'gh pr create' "$sync"
+          grep -Fq -- '--force-with-lease="refs/heads/$SYNC_BRANCH:$AUTOMATION_BRANCH_SHA"' "$sync"
+          grep -Fq -- '--force-with-lease="refs/heads/$SYNC_BRANCH:"' "$sync"
+
+          source .github/scripts/agent-governance-manifest.sh
+          agent_governance_validate_manifest
+          grep -Fq 'agent_governance_mappings upstream "$manifest"' "$sync"
+          mapfile -t managed < <(agent_governance_mappings upstream)
+          [[ "${#managed[@]}" -gt 0 ]]
+
+
+      - name: Validate consumer distribution contract
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          distribution=".github/scripts/automation/distribute-agent-skills.sh"
+          distribution_workflow=".github/workflows/distribute-agent-skills.yml"
+
+          grep -Fq 'readonly SYNC_BRANCH="chore/sync-agent-governance"' "$distribution"
+          grep -Fq 'permission-contents: write' "$distribution_workflow"
+          grep -Fq 'permission-pull-requests: write' "$distribution_workflow"
+          grep -Fq '[[ "$visibility" != "public" ]]' "$distribution"
+          grep -Fq 'gh pr create' "$distribution"
+          grep -Fq -- '--force-with-lease=' "$distribution"
+          grep -Fq 'Missing skills are not installed automatically.' "$distribution"
+
+          source .github/scripts/agent-governance-manifest.sh
+          agent_governance_validate_manifest
+          grep -Fq 'agent_governance_mappings distribution "$manifest"' "$distribution"
+          grep -Fq '"agent-governance/manifest.json"' "$distribution_workflow"
+          grep -Fq '"agent-governance/skills/**"' "$distribution_workflow"
+          mapfile -t managed < <(agent_governance_mappings distribution)
+          [[ "${#managed[@]}" -gt 0 ]]
+ "$scanner"; then
+            echo "::error::Reusable secret scan must pin the size-policy action to a full immutable commit SHA."
+            exit 1
+          fi
+
+          if ! grep -Eq '^[[:space:]]*uses: rodri-oliveira-dev/.github/.github/workflows/reusable-secret-scan\.yml@[0-9a-f]{40}[[:space:]]*
+
+          fixture_root="$(mktemp -d)"
+          trap 'rm -rf "$fixture_root"' EXIT
+
+          init_repo() {
+            local path="$1"
+            git init --quiet "$path"
+            git -C "$path" config user.name fixture
+            git -C "$path" config user.email fixture@example.invalid
+          }
+
+          large_repo="$fixture_root/large"
+          init_repo "$large_repo"
+
+          dd if=/dev/zero of="$large_repo/oversized.fixture" bs=1M count=21 status=none
+          printf '%s%s\n' 'gh' 'p_abcdefghijklmnopqrstuvwxyz0123456789ABCD' >> "$large_repo/oversized.fixture"
+          grep -aFq 'ghp_abcdefghijklmnopqrstuvwxyz0123456789ABCD' "$large_repo/oversized.fixture"
+
+          git -C "$large_repo" add oversized.fixture
+          git -C "$large_repo" commit --quiet -m 'large secret fixture'
+
+          large_output="$fixture_root/large-output"
+          large_summary="$fixture_root/large-summary"
+          (
+            cd "$large_repo"
+            GITHUB_OUTPUT="$large_output" \
+            GITHUB_STEP_SUMMARY="$large_summary" \
+            LOG_OPTS="--all" \
+            MAX_TARGET_MEGABYTES="20" \
+              bash "$GITHUB_WORKSPACE/$size_policy"
+          )
+
+          grep -Fxq 'result=coverage-failure' "$large_output"
+          oversized_count="$(sed -n 's/^oversized-count=//p' "$large_output")"
+          [[ "$oversized_count" -ge 1 ]]
+          grep -Fq 'Secret scan size coverage' "$large_summary"
+          grep -Fq 'A clean scanner result would not prove complete coverage.' "$large_summary"
+
+          small_repo="$fixture_root/small"
+          init_repo "$small_repo"
+          printf 'safe fixture\n' > "$small_repo/small.txt"
+          git -C "$small_repo" add small.txt
+          git -C "$small_repo" commit --quiet -m 'small fixture'
+
+          small_output="$fixture_root/small-output"
+          small_summary="$fixture_root/small-summary"
+          (
+            cd "$small_repo"
+            GITHUB_OUTPUT="$small_output" \
+            GITHUB_STEP_SUMMARY="$small_summary" \
+            LOG_OPTS="--all" \
+            MAX_TARGET_MEGABYTES="20" \
+              bash "$GITHUB_WORKSPACE/$size_policy"
+          )
+
+          grep -Fxq 'result=covered' "$small_output"
+          grep -Fxq 'oversized-count=0' "$small_output"
+          grep -Fq 'All tracked Git blobs in the selected scan scope are within the scanner size limit.' "$small_summary"
+
+
+      - name: Validate .NET SDK refresh policy
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          policy=".github/scripts/dotnet-sdk-sync-policy.sh"
+          sdk=".github/scripts/automation/dotnet-sdk-sync.sh"
+
+          bash -n "$policy"
+          source "$policy"
+
+          # Strict stable numeric versions only.
+          validate_stable_sdk_version "10.0.102" "fixture"
+          if validate_stable_sdk_version "10.0.x" "fixture"; then
+            echo "::error::Malformed SDK version was incorrectly accepted."
+            exit 1
+          fi
+          grep -Fq "stable numeric major.minor.patch" <<< "$SDK_POLICY_ERROR"
+
+          if validate_sdk_pair "10.0.101" "9.0.300"; then
+            echo "::error::Cross-channel SDK transition was incorrectly accepted."
+            exit 1
+          fi
+          grep -Fq "same major.minor channel" <<< "$SDK_POLICY_ERROR"
+
+          # No PR / new PR path: default branch needs an update.
+          sdk_update_relation "10.0.100" "10.0.102"
+          [[ "$SDK_UPDATE_RELATION" == "update" ]]
+
+          # Existing PR already current: formatting is irrelevant; sdk.version controls idempotency.
+          current_pr_json='{ "sdk": { "rollForward": "latestPatch", "version": "10.0.102" } }'
+          current_pr_version="$(jq -r '.sdk.version' <<< "$current_pr_json")"
+          sdk_update_relation "$current_pr_version" "10.0.102"
+          [[ "$SDK_UPDATE_RELATION" == "current" ]]
+
+          # Existing PR is stale and must be refreshed to the latest eligible patch.
+          stale_pr_json=$'{\n  "sdk": {\n    "version": "10.0.101"\n  }\n}'
+          stale_pr_version="$(jq -r '.sdk.version' <<< "$stale_pr_json")"
+          sdk_update_relation "$stale_pr_version" "10.0.102"
+          [[ "$SDK_UPDATE_RELATION" == "update" ]]
+
+          # Never downgrade an automation branch that is already newer than release metadata.
+          sdk_update_relation "10.0.103" "10.0.102"
+          [[ "$SDK_UPDATE_RELATION" == "newer" ]]
+
+          # Workflow contract: validated before mutation, existing PR is edited, and CAS lease is preserved.
+          grep -Fq 'source "$SDK_POLICY"' "$sdk"
+          grep -Fq 'validate_stable_sdk_version "$current" "Current SDK"' "$sdk"
+          grep -Fq 'sdk_update_relation "$current" "$latest"' "$sdk"
+          grep -Fq 'sdk_update_relation "$branch_version" "$latest"' "$sdk"
+          grep -Fq 'PR #$AUTOMATION_PR_NUMBER already proposes latest SDK $latest' "$sdk"
+          grep -Fq 'gh pr edit "$pr_number"' "$sdk"
+          grep -Fq -- '--force-with-lease="refs/heads/$UPDATE_BRANCH:$branch_parent_sha"' "$sdk"
+          grep -Fq 'pull_requests_updated=$((pull_requests_updated + 1))' "$sdk"
+          grep -Fq -- '--data-urlencode "ref=$default_sha"' "$sdk"
+          grep -Fq 'sdk_update_relation "$exact_source_version" "$latest"' "$sdk"
+          grep -Fq 'reconcile_existing_pr_metadata()' "$sdk"
+          grep -Fq '[[ "$current_title" == "$desired_title" && "$current_body" == "$desired_body" ]]' "$sdk"
+          grep -Fq 'RECONCILED_PR_CHANGED="true"' "$sdk"
+
+          exact_validation_line="$(grep -n -E '^[[:space:]]*if ! sdk_update_relation "\$exact_source_version" "\$latest"; then[[:space:]]*$' "$sdk" | head -n 1 | cut -d: -f1)"
+          branch_creation_line="$(grep -n -F '"repos/$repo/git/refs"' "$sdk" | head -n 1 | cut -d: -f1)"
+          if [[ -z "$exact_validation_line" || -z "$branch_creation_line" || "$exact_validation_line" -ge "$branch_creation_line" ]]; then
+            echo "::error::The exact default-branch SDK source must be validated before creating the reserved automation branch."
+            exit 1
+          fi
+
+          reconcile_calls="$(grep -Fc 'reconcile_existing_pr_metadata "$repo" "$AUTOMATION_PR_NUMBER" "$desired_pr_title" "$pr_body"' "$sdk")"
+          if [[ "$reconcile_calls" -lt 2 ]]; then
+            echo "::error::Existing PR metadata must be reconciled both on the no-op/current path and after a branch refresh."
+            exit 1
+          fi
+
+          metadata_guard_line="$(grep -n -F '[[ "$current_title" == "$desired_title" && "$current_body" == "$desired_body" ]]' "$sdk" | head -n 1 | cut -d: -f1)"
+          metadata_edit_line="$(grep -n -F 'gh pr edit "$pr_number"' "$sdk" | head -n 1 | cut -d: -f1)"
+          if [[ -z "$metadata_guard_line" || -z "$metadata_edit_line" || "$metadata_guard_line" -ge "$metadata_edit_line" ]]; then
+            echo "::error::PR metadata must be compared before gh pr edit is invoked."
+            exit 1
+          fi
+
+          if grep -Fq '[[ "$branch_content" == "$updated_content" ]]' "$sdk"; then
+            echo "::error::SDK refresh idempotency must compare sdk.version semantically, not raw JSON formatting."
+            exit 1
+          fi
+
+      - name: Validate cross-repository batch failure isolation
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          for script in .github/scripts/batch-retry.sh .github/scripts/test-batch-failure-isolation.sh; do
+            bash -n "$script"
+          done
+
+          # Bash components are versioned separately from the workflow wrappers.
+          for script in .github/scripts/automation/*.sh; do
+            bash -n "$script"
+          done
+
+          bash .github/scripts/test-batch-failure-isolation.sh
+          bash .github/scripts/test-automation-extraction.sh
+
+      - name: Validate inventory timeout and process-group cancellation
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          bash -n .github/scripts/test-inventory-timeout.sh
+          bash .github/scripts/test-inventory-timeout.sh
+
+      - name: Validate automation branch ownership policy
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          policy=".github/scripts/automation-branch-ownership.sh"
+          sdk=".github/scripts/automation/dotnet-sdk-sync.sh"
+          upstream=".github/scripts/automation/sync-agent-skills.sh"
+          distribution=".github/scripts/automation/distribute-agent-skills.sh"
+
+          bash -n "$policy"
+          grep -Fq 'verify_automation_branch_ownership' "$sdk"
+          grep -Fq 'verify_automation_branch_ownership' "$upstream"
+          grep -Fq 'verify_automation_branch_ownership' "$distribution"
+          grep -Fq '<!-- automation-branch-owner: dotnet-sdk-sync/v1 -->' "$sdk"
+          grep -Fq '<!-- automation-branch-owner: sync-upstream-agent-skills/v1 -->' "$upstream"
+          grep -Fq '<!-- automation-branch-owner: distribute-agent-skills/v1 -->' "$distribution"
+          grep -Fq 'reconcile_existing_pr_metadata "$repo" "$AUTOMATION_PR_NUMBER" "$desired_pr_title" "$pr_body"' "$sdk"
+          grep -Fq 'branch_parent_sha="$AUTOMATION_BRANCH_SHA"' "$sdk"
+          grep -Fq 'sdk_worktree="$(mktemp -d)"' "$sdk"
+          grep -Fq -- '--force-with-lease="refs/heads/$UPDATE_BRANCH:$branch_parent_sha"' "$sdk"
+          grep -Fq 'origin "HEAD:refs/heads/$UPDATE_BRANCH"' "$sdk"
+
+          if grep -Fq -- '--method PATCH' "$sdk"; then
+            echo "::error::SDK sync must use an exact-head lease instead of ancestry-only ref PATCH semantics."
+            exit 1
+          fi
+
+          if grep -Fq -- '--method DELETE' "$sdk"; then
+            echo "::error::SDK sync must not delete a reserved branch based only on its name."
+            exit 1
+          fi
+
+          grep -Fq -- '--force-with-lease="refs/heads/$SYNC_BRANCH:$AUTOMATION_BRANCH_SHA"' "$upstream"
+          grep -Fq -- '--force-with-lease="refs/heads/$SYNC_BRANCH:"' "$upstream"
+          grep -Fq -- '--force-with-lease="refs/heads/$SYNC_BRANCH:$AUTOMATION_BRANCH_SHA"' "$distribution"
+          grep -Fq -- '--force-with-lease="refs/heads/$SYNC_BRANCH:"' "$distribution"
+
+          fake_bin="$(mktemp -d)"
+          race_root="$(mktemp -d)"
+          trap 'rm -rf "$fake_bin" "$race_root"' EXIT
+
+          cat > "$fake_bin/gh" <<'SH'
+          #!/usr/bin/env bash
+          set -Eeuo pipefail
+          case "$*" in
+            *"/git/matching-refs/"*)
+              printf '%s\n' "${FAKE_REFS_JSON:-[]}"
+              ;;
+            *"/pulls"*)
+              printf '%s\n' "${FAKE_PRS_JSON:-[]}"
+              ;;
+            *)
+              echo "unexpected fake gh invocation: $*" >&2
+              exit 1
+              ;;
+          esac
+          SH
+          chmod +x "$fake_bin/gh"
+          export PATH="$fake_bin:$PATH"
+
+          source "$policy"
+
+          fixture_repo="rodri-oliveira-dev/fixture"
+          fixture_branch="chore/fixture-automation"
+          fixture_base="main"
+          fixture_title="chore: fixture automation"
+          fixture_marker="<!-- automation-branch-owner: fixture/v1 -->"
+          owned_sha="1111111111111111111111111111111111111111"
+
+          FAKE_REFS_JSON="$(
+            jq -cn \
+              --arg ref "refs/heads/$fixture_branch" \
+              --arg sha "$owned_sha" \
+              '[{ref:$ref, object:{sha:$sha}}]'
+          )"
+          export FAKE_REFS_JSON
+
+          FAKE_PRS_JSON="$(
+            jq -cn \
+              --arg repo "$fixture_repo" \
+              --arg branch "$fixture_branch" \
+              --arg base "$fixture_base" \
+              --arg sha "$owned_sha" \
+              --arg title "$fixture_title" \
+              --arg body "$fixture_marker" \
+              '[{
+                number:42,
+                html_url:"https://github.com/example/example/pull/42",
+                title:$title,
+                body:$body,
+                head:{sha:$sha, ref:$branch, repo:{full_name:$repo}},
+                base:{ref:$base}
+              }]'
+          )"
+          export FAKE_PRS_JSON
+
+          verify_automation_branch_ownership \
+            "$fixture_repo" "$fixture_branch" "$fixture_base" "$fixture_marker" "$fixture_title"
+          [[ "$AUTOMATION_BRANCH_STATE" == "owned" ]]
+          [[ "$AUTOMATION_BRANCH_SHA" == "$owned_sha" ]]
+          [[ "$AUTOMATION_PR_NUMBER" == "42" ]]
+
+          export FAKE_PRS_JSON='[]'
+          if verify_automation_branch_ownership \
+            "$fixture_repo" "$fixture_branch" "$fixture_base" "$fixture_marker" "$fixture_title"; then
+            echo "::error::A human/unproven branch using the reserved name was incorrectly accepted."
+            exit 1
+          fi
+          grep -Fq 'ownership is unproven' <<< "$AUTOMATION_OWNERSHIP_ERROR"
+
+          export FAKE_REFS_JSON='[]'
+          export FAKE_PRS_JSON='[]'
+          verify_automation_branch_ownership \
+            "$fixture_repo" "$fixture_branch" "$fixture_base" "$fixture_marker" "$fixture_title"
+          [[ "$AUTOMATION_BRANCH_STATE" == "absent" ]]
+
+          remote="$race_root/remote.git"
+          seed="$race_root/seed"
+          racer="$race_root/racer"
+          git init --quiet --bare "$remote"
+          git clone --quiet "$remote" "$seed"
+          git -C "$seed" config user.name fixture
+          git -C "$seed" config user.email fixture@example.invalid
+          echo base > "$seed/file.txt"
+          git -C "$seed" add file.txt
+          git -C "$seed" commit --quiet -m base
+          git -C "$seed" push --quiet origin HEAD:main
+          git -C "$seed" checkout --quiet -b "$fixture_branch"
+          echo owned >> "$seed/file.txt"
+          git -C "$seed" commit --quiet -am owned
+          git -C "$seed" push --quiet origin "HEAD:refs/heads/$fixture_branch"
+
+          captured_sha="$(git ls-remote "$remote" "refs/heads/$fixture_branch" | awk '{print $1}')"
+          echo candidate >> "$seed/file.txt"
+          git -C "$seed" commit --quiet -am candidate
+
+          git clone --quiet --branch "$fixture_branch" "$remote" "$racer"
+          git -C "$racer" config user.name racer
+          git -C "$racer" config user.email racer@example.invalid
+          echo race >> "$racer/file.txt"
+          git -C "$racer" commit --quiet -am race
+          git -C "$racer" push --quiet origin "HEAD:refs/heads/$fixture_branch"
+
+          if git -C "$seed" push --quiet \
+            --force-with-lease="refs/heads/$fixture_branch:$captured_sha" \
+            origin "HEAD:refs/heads/$fixture_branch" 2>/dev/null; then
+            echo "::error::A stale force-with-lease unexpectedly overwrote a branch changed after SHA capture."
+            exit 1
+          fi
+
+          ancestor_sha="$(git -C "$seed" rev-parse "$captured_sha^")"
+          git --git-dir="$remote" update-ref "refs/heads/$fixture_branch" "$ancestor_sha"
+
+          if git -C "$seed" push --quiet \
+            --force-with-lease="refs/heads/$fixture_branch:$captured_sha" \
+            origin "HEAD:refs/heads/$fixture_branch" 2>/dev/null; then
+            echo "::error::A stale exact-head lease unexpectedly overwrote a branch reset to an ancestor."
+            exit 1
+          fi
+
+      - name: Validate upstream skill sync contract
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          sync=".github/scripts/automation/sync-agent-skills.sh"
+          sync_workflow=".github/workflows/sync-agent-skills.yml"
+
+          grep -Fq 'cron: "20 12 * * 1"' "$sync_workflow"
+          grep -Fq 'SOURCE_REPO: rodri-oliveira-dev/dotnet-library-template' "$sync_workflow"
+          grep -Fq 'readonly SYNC_BRANCH="chore/sync-upstream-agent-skills"' "$sync"
+          grep -Fq 'gh pr create' "$sync"
+          grep -Fq -- '--force-with-lease="refs/heads/$SYNC_BRANCH:$AUTOMATION_BRANCH_SHA"' "$sync"
+          grep -Fq -- '--force-with-lease="refs/heads/$SYNC_BRANCH:"' "$sync"
+
+          source .github/scripts/agent-governance-manifest.sh
+          agent_governance_validate_manifest
+          grep -Fq 'agent_governance_mappings upstream "$manifest"' "$sync"
+          mapfile -t managed < <(agent_governance_mappings upstream)
+          [[ "${#managed[@]}" -gt 0 ]]
+
+
+      - name: Validate consumer distribution contract
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          distribution=".github/scripts/automation/distribute-agent-skills.sh"
+          distribution_workflow=".github/workflows/distribute-agent-skills.yml"
+
+          grep -Fq 'readonly SYNC_BRANCH="chore/sync-agent-governance"' "$distribution"
+          grep -Fq 'permission-contents: write' "$distribution_workflow"
+          grep -Fq 'permission-pull-requests: write' "$distribution_workflow"
+          grep -Fq '[[ "$visibility" != "public" ]]' "$distribution"
+          grep -Fq 'gh pr create' "$distribution"
+          grep -Fq -- '--force-with-lease=' "$distribution"
+          grep -Fq 'Missing skills are not installed automatically.' "$distribution"
+
+          source .github/scripts/agent-governance-manifest.sh
+          agent_governance_validate_manifest
+          grep -Fq 'agent_governance_mappings distribution "$manifest"' "$distribution"
+          grep -Fq '"agent-governance/manifest.json"' "$distribution_workflow"
+          grep -Fq '"agent-governance/skills/**"' "$distribution_workflow"
+          mapfile -t managed < <(agent_governance_mappings distribution)
+          [[ "${#managed[@]}" -gt 0 ]]
+ "$caller"; then
+            echo "::error::Control-plane secret scan must pin the reusable workflow to a full immutable commit SHA."
             exit 1
           fi
 

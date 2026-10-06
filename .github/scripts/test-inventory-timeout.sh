@@ -12,6 +12,7 @@ trap 'rm -rf -- "$fixture_root"' EXIT
 trap 'rc=$?; echo "::error::Timeout harness failed on line $LINENO (exit $rc): $BASH_COMMAND"; if [[ -f "$fixture_root/production-output.log" ]]; then tail -n 70 "$fixture_root/production-output.log"; fi; if [[ -f "$fixture_root/artifacts/dotnet-repository-inventory.json" ]]; then jq "{summary,repositories,problems,projects}" "$fixture_root/artifacts/dotnet-repository-inventory.json"; fi; exit "$rc"' ERR
 
 command -v timeout >/dev/null
+command -v setsid >/dev/null
 command -v ps >/dev/null
 
 grep -Fq 'timeout-minutes: 15' "$inventory_workflow"
@@ -22,6 +23,8 @@ grep -Fq 'REPOSITORY_INSPECTION_TIMEOUT_SECONDS: "300"' "$inventory_workflow"
 grep -Fq 'run_bounded_command "$REPOSITORY_CLONE_TIMEOUT_SECONDS"' "$inventory"
 grep -Fq 'run_bounded_command "$REPOSITORY_INSPECTION_TIMEOUT_SECONDS"' "$inventory"
 grep -Fq 'timeout --verbose --signal=TERM --kill-after=10s "${seconds}s"' "$inventory"
+grep -Fq 'setsid --wait "$@"' "$inventory"
+grep -Fq 'kill -KILL -- "-$command_group"' "$inventory"
 grep -Fq 'grep -Fq '\''timeout: sending signal TERM to command'\'' "$diagnostics_file"' "$inventory"
 [[ "$(grep -Fc 'if [[ "$BOUNDED_COMMAND_TIMED_OUT" == "true" ]]; then' "$inventory")" -eq 2 ]]
 if grep -Eq 'clone_exit_code.*(124|137)|inspector_exit_code.*(124|137)' "$inventory"; then

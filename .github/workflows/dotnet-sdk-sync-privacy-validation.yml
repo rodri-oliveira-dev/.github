@@ -5,6 +5,8 @@ on:
     paths:
       - ".github/workflows/dotnet-sdk-sync.yml"
       - ".github/scripts/automation/dotnet-sdk-sync.sh"
+      - ".github/scripts/dotnet-sdk-sync-policy.sh"
+      - ".github/scripts/test-dotnet-sdk-sync-policy.sh"
       - ".github/workflows/dotnet-sdk-sync-privacy-validation.yml"
   push:
     branches:
@@ -12,6 +14,8 @@ on:
     paths:
       - ".github/workflows/dotnet-sdk-sync.yml"
       - ".github/scripts/automation/dotnet-sdk-sync.sh"
+      - ".github/scripts/dotnet-sdk-sync-policy.sh"
+      - ".github/scripts/test-dotnet-sdk-sync-policy.sh"
       - ".github/workflows/dotnet-sdk-sync-privacy-validation.yml"
   workflow_dispatch:
 

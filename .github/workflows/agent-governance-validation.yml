@@ -266,6 +266,8 @@ jobs:
           sdk=".github/scripts/automation/dotnet-sdk-sync.sh"
 
           bash -n "$policy"
+          bash -n .github/scripts/test-dotnet-sdk-sync-policy.sh
+          bash .github/scripts/test-dotnet-sdk-sync-policy.sh
           source "$policy"
 
           # Strict stable numeric versions only.
@@ -316,6 +318,9 @@ jobs:
           grep -Fq 'reconcile_existing_pr_metadata()' "$sdk"
           grep -Fq '[[ "$current_title" == "$desired_title" && "$current_body" == "$desired_body" ]]' "$sdk"
           grep -Fq 'RECONCILED_PR_CHANGED="true"' "$sdk"
+          grep -Fq 'load_sdk_channel_metadata "$release_index" "$channel"' "$sdk"
+          grep -Fq 'case "${DRY_RUN:-}" in' "$sdk"
+          grep -Fq 'if [[ "$DRY_RUN" == "false" ]]; then' "$sdk"
 
           exact_validation_line="$(grep -n -E '^[[:space:]]*if ! sdk_update_relation "\$exact_source_version" "\$latest"; then[[:space:]]*$' "$sdk" | head -n 1 | cut -d: -f1)"
           branch_creation_line="$(grep -n -F '"repos/$repo/git/refs"' "$sdk" | head -n 1 | cut -d: -f1)"

@@ -73,7 +73,7 @@ As integrações atuais baseadas na API incluem:
 
 O modelo de integração segue o princípio de menor privilégio: as permissões da GitHub App são restritas às necessidades de cada workflow, alterações são controladas por revisão através de Pull Requests e workflows somente leitura não modificam os repositórios inspecionados.
 
-Branches reservadas de automação usam um contrato explícito de provenance em vez de confiar no nome da branch. Uma branch existente só pode ser atualizada quando um Pull Request aberto correspondente, no mesmo repositório, contém o marker de ownership esperado e seu head SHA corresponde ao ref remoto atual; force-updates ainda usam `--force-with-lease` vinculado explicitamente ao SHA capturado. Consulte [ownership de branches de automação](docs/automation-branch-ownership.pt-BR.md) para o contrato completo e o procedimento de recuperação de branches órfãs.
+Branches reservadas de automação usam um contrato explícito de provenance em vez de confiar no nome da branch. Uma branch existente só pode ser atualizada quando um Pull Request aberto criado por bot apresenta repositório, base, head SHA e evidências de ownership esperados; force-updates ainda usam `--force-with-lease` vinculado ao SHA capturado. Colisões históricas permanecem intactas e são recuperadas por uma branch determinística específica da automação. Consulte [ownership de branches de automação](docs/automation-branch-ownership.pt-BR.md) para o contrato completo.
 
 ## Implementação e testes locais das automações
 
@@ -129,7 +129,7 @@ Esse workflow é uma automação de manutenção e não um arquivo de comunidade
 
 Como este control plane é público, a sincronização de SDK trata a visibilidade do repositório como uma trust boundary. A saída da descoberta da instalação serializa metadados completos somente quando a visibilidade é explicitamente `public`; valores private, internal, ausentes ou de qualquer outra forma não públicos são convertidos imediatamente em um marcador anônimo. Logs públicos e o Job Summary expõem apenas a contagem agregada de repositórios não públicos ignorados, e o loop de sincronização não realiza operações de leitura ou escrita nesses repositórios.
 
-A branch reservada `chore/sync-dotnet-sdk` nunca é apagada apenas porque seu nome corresponde à convenção da automação. Se ela já existir, o workflow exige provenance válida do Pull Request antes de tratá-la como controlada pela automação; uma branch órfã ou criada manualmente permanece intacta e é reportada como erro de ownership.
+A branch reservada `chore/sync-dotnet-sdk` nunca é apagada apenas porque seu nome corresponde à convenção da automação. Se uma branch histórica mesclada, fechada, modificada, conflitante ou sem comprovação ocupar esse nome, ela permanece intacta e o workflow usa uma branch determinística específica da automação. Se a branch de recuperação também não tiver ownership comprovado, o repositório é reportado como bloqueio de segurança e não sofre mutação.
 
 A cada execução, o workflow recalcula o patch estável elegível mais recente. Se o Pull Request automation-owned estiver defasado, a mesma branch e o mesmo PR são atualizados para o novo target; um segundo PR não é criado. Se a branch já contiver o `sdk.version` alvo, nenhuma alteração é feita, mesmo que a formatação do JSON seja diferente. As versões atual e alvo precisam seguir o formato numérico estável `major.minor.patch` e permanecer no mesmo canal `major.minor` antes de qualquer mutação; metadados inválidos ou estado incompatível da branch falham de forma segura.
 

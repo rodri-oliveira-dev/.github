@@ -74,7 +74,7 @@ Current API-backed integrations include:
 
 The integration model follows least privilege: GitHub App permissions are scoped to each workflow's needs, writes are review-gated through Pull Requests, and read-only workflows do not modify inspected repositories.
 
-Reserved automation branches use an explicit provenance contract rather than trusting a branch name. Existing branches can be refreshed only when a matching open Pull Request from the same repository carries the expected ownership marker and its head SHA matches the current remote ref; force updates additionally use an explicit SHA-bound `--force-with-lease`. See [automation branch ownership](docs/automation-branch-ownership.md) for the full contract and orphaned-branch recovery procedure.
+Reserved automation branches use an explicit provenance contract rather than trusting a branch name. Existing branches can be refreshed only when a matching bot-authored open Pull Request has the expected repository, base, head SHA and ownership evidence; force updates additionally use an explicit SHA-bound `--force-with-lease`. Historical collisions are left untouched and recovered through a deterministic automation-specific branch. See [automation branch ownership](docs/automation-branch-ownership.md) for the full contract.
 
 ## Automation implementation and local tests
 
@@ -130,7 +130,7 @@ This workflow is maintenance automation, not a default community-health file inh
 
 Because this control plane is public, the SDK synchronization treats repository visibility as a trust boundary. The installation discovery output serializes full repository metadata only for entries whose visibility is explicitly `public`; private, internal, missing, or otherwise non-public visibility values are converted immediately to an anonymous sentinel. Public logs and the Job Summary expose only the aggregate count of non-public repositories skipped, and no read/write operation is performed against those repositories by the synchronization loop.
 
-The reserved `chore/sync-dotnet-sdk` branch is never deleted merely because its name matches the automation convention. If it already exists, the workflow requires valid Pull Request provenance before treating it as automation-owned; an orphaned or human-created branch is left untouched and reported as an ownership error.
+The reserved `chore/sync-dotnet-sdk` branch is never deleted merely because its name matches the automation convention. If a merged, closed, modified, conflicting, or unproven historical branch occupies that name, it remains untouched and the workflow uses a deterministic automation-specific recovery branch. If that recovery branch also lacks proven ownership, the repository is reported as a security block and is not mutated.
 
 Each run recalculates the latest eligible stable patch. If the automation-owned Pull Request is stale, the same branch and PR are refreshed to that target; a second PR is not created. If the branch already contains the target `sdk.version`, it is left untouched even when JSON formatting differs. Both current and target versions must use stable numeric `major.minor.patch` format and remain in the same `major.minor` channel before any branch mutation; invalid metadata or an incompatible branch state fails safely.
 

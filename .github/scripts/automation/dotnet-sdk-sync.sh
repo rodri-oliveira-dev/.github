@@ -20,6 +20,14 @@ source "$OWNERSHIP_POLICY"
 source "$SDK_POLICY"
 source "$GITHUB_WORKSPACE/.github/scripts/batch-retry.sh"
 
+case "${DRY_RUN:-}" in
+  true|false) ;;
+  *)
+    echo "::error title=Invalid execution mode::DRY_RUN must be exactly 'true' or 'false'."
+    exit 1
+    ;;
+esac
+
 release_index="$(mktemp)"
 repositories_file="$(mktemp)"
 sdk_worktree=""
@@ -42,7 +50,7 @@ log_result() {
   local status="error"
   case "$result" in
     "Current"*|"PR #"*) status="current" ;;
-    "No root"*|"No update"*|"Skipped (archived"*|"Dry run"*) status="skipped" ;;
+    "No root"*|"No update"*|"Unsupported"*|"Skipped (archived"*|"Dry run"*) status="skipped" ;;
     "PR created"*|"PR metadata updated"*|"PR branch refreshed"*) status="success" ;;
   esac
   printf '| `%s` | %s | %s |\n' "$repo" "$status" "$result" | tee -a "$GITHUB_STEP_SUMMARY"
@@ -132,6 +140,8 @@ write_summary() {
     echo "| Repositories scanned | $repositories_scanned |"
     echo "| Repositories with root global.json | $repositories_with_global_json |"
     echo "| Repositories already current / no automatic update | $repositories_current |"
+    echo "| Repositories on unsupported SDK channels | $unsupported_channels |"
+    echo "| Dry-run updates reported | $dry_run_updates |"
     echo "| Repositories with updates | $repositories_with_updates |"
     echo "| Files updated | $files_updated |"
     echo "| Pull requests created | $pull_requests_created |"
@@ -167,6 +177,8 @@ gh api --paginate "/installation/repositories?per_page=100" \
 repositories_scanned=0
 repositories_with_global_json=0
 repositories_current=0
+unsupported_channels=0
+dry_run_updates=0
 repositories_with_updates=0
 pull_requests_created=0
 pull_requests_updated=0
@@ -178,7 +190,9 @@ repository_errors=0
 files_updated=0
 
 write_header
-gh auth setup-git
+if [[ "$DRY_RUN" == "false" ]]; then
+  gh auth setup-git
+fi
 
 tab="$(printf '\t')"
 
@@ -282,42 +296,22 @@ while IFS="$tab" read -r visibility_marker repo default_branch archived fork; do
 
   channel="$(sdk_channel "$current")"
 
-  if ! metadata="$(
-    jq -r --arg channel "$channel" '
-      .["releases-index"][]
-      | select(.["channel-version"] == $channel)
-      | select(
-          .["support-phase"] == "active"
-          or .["support-phase"] == "maintenance"
-        )
-      | [
-          .["latest-sdk"],
-          .["release-type"],
-          .["support-phase"]
-        ]
-      | @tsv
-    ' "$release_index" | head -n 1
-  )"; then
-    repository_errors=$((repository_errors + 1))
-    echo "::error title=Release metadata parsing failed::$repo could not read its SDK channel."
-    log_result "$repo" "Error — release metadata parsing failed"
-    continue
-  fi
-
-  if [[ -z "$metadata" ]]; then
-    repositories_current=$((repositories_current + 1))
-    log_result "$repo" "No update (unsupported channel $channel; current $current)"
-    continue
-  fi
-
-  IFS="$tab" read -r latest release_type support_phase <<< "$metadata"
-
-  if [[ -z "$latest" || "$latest" == *-* ]]; then
+  if ! load_sdk_channel_metadata "$release_index" "$channel"; then
     sdk_policy_errors=$((sdk_policy_errors + 1))
-    echo "::error title=Invalid latest SDK::$repo: release metadata did not provide a stable SDK for $channel."
-    log_result "$repo" "Error — release metadata returned no stable SDK for $channel"
+    echo "::error title=Release metadata policy failed::$repo: $SDK_POLICY_ERROR"
+    log_result "$repo" "Error — invalid release metadata for channel $channel"
     continue
   fi
+
+  if [[ "$SDK_CHANNEL_STATE" == "unsupported" ]]; then
+    unsupported_channels=$((unsupported_channels + 1))
+    log_result "$repo" "Unsupported channel $channel (current $current); migration requires review"
+    continue
+  fi
+
+  latest="$SDK_CHANNEL_LATEST"
+  release_type="$SDK_CHANNEL_RELEASE_TYPE"
+  support_phase="$SDK_CHANNEL_SUPPORT_PHASE"
 
   if ! sdk_update_relation "$current" "$latest"; then
     sdk_policy_errors=$((sdk_policy_errors + 1))
@@ -351,6 +345,7 @@ while IFS="$tab" read -r visibility_marker repo default_branch archived fork; do
   repositories_with_updates=$((repositories_with_updates + 1))
 
   if [[ "$DRY_RUN" == "true" ]]; then
+    dry_run_updates=$((dry_run_updates + 1))
     log_result "$repo" "Dry run — $GLOBAL_JSON_PATH: $current → $latest ($release_type, $support_phase)"
     continue
   fi

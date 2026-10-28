@@ -108,6 +108,8 @@ Mudanças no contrato de governança passam por verificação de versão em todo
 
 O workflow [`dotnet-sdk-sync.yml`](.github/workflows/dotnet-sdk-sync.yml) fornece manutenção centralizada de SDK para os repositórios acessíveis à GitHub App configurada.
 
+As recomendações entre versões principais e seus critérios não automáticos de elegibilidade, risco e segurança estão documentados na [política de recomendação para migração de versão principal do .NET](docs/dotnet-major-migration-policy.pt-BR.md).
+
 A política atual é deliberadamente conservadora:
 
 - verifica somente o `global.json` localizado na raiz do repositório;
@@ -139,7 +141,7 @@ O workflow [`dotnet-repository-inventory.yml`](.github/workflows/dotnet-reposito
 
 O workflow usa duas trust boundaries explícitas. O job `discovery` é o único que recebe as credenciais da GitHub App; ele reduz a instalação a repositórios do owner que sejam públicos, não arquivados e não forks, transferindo apenas `repository` e `default_branch` por um artifact sanitizado com retenção de um dia. O job `inspection` baixa e valida esse artifact antes de qualquer clone, não recebe a private key da GitHub App nem token de escrita cross-repository, clona somente esses repositórios públicos e executa DotNetRepoInspector/MSBuild nessa fronteira sem privilégio. Isso continua válido mesmo com a instalação da GitHub App configurada como `All repositories`, portanto metadados de repositórios não públicos não são transferidos para o job de inspeção nem publicados por este control plane público.
 
-Ele usa [`rodri-oliveira-dev/DotNetRepoInspector`](https://github.com/rodri-oliveira-dev/DotNetRepoInspector) como fonte de verdade para inspeção dos projetos. O código executável está fixado na versão **v1.5.2**, commit imutável `6524981f737086c1fdb370697e5d4100330f9bc3`; antes de restore/build, o workflow confirma que o checkout detached resolveu exatamente para esse SHA. A classificação é baseada em metadados MSBuild efetivos obtidos pelo Inspector, não em heurísticas Bash nem parsing direto de `.csproj`.
+Ele usa [`rodri-oliveira-dev/DotNetRepoInspector`](https://github.com/rodri-oliveira-dev/DotNetRepoInspector) como fonte de verdade para inspeção dos projetos. O código executável está fixado na versão **v1.7.0**, commit imutável `f4afc23391bb7719327d2f5702da90c2076b0a39`; antes de restore/build, o workflow confirma que o checkout detached resolveu exatamente para esse SHA. A classificação, os target frameworks, os SDKs resolvidos e as propriedades de publicação são baseados em metadados MSBuild efetivos obtidos pelo Inspector, não em heurísticas Bash nem parsing direto de `.csproj`. O inventário preserva os estados explícitos de publicação do Inspector (`evaluated`, `unspecified`, `unknown` e `context-dependent`) em vez de inferir valores.
 
 A versão e o SHA do Inspector são registrados no log do workflow, GitHub Actions Summary, metadados do artifact JSON e em todas as linhas do CSV. Atualizar o Inspector é uma mudança revisada do control plane: confirme a release estável desejada e seu commit no `DotNetRepoInspector`, atualize `INSPECTOR_VERSION` e `INSPECTOR_SHA` juntos em `dotnet-repository-inventory.yml` e faça a alteração por Pull Request. O check `Validate governance source` rejeita checkout mutável de `main`/`master` e qualquer SHA que não tenha 40 caracteres.
 

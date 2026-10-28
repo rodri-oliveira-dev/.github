@@ -40,6 +40,8 @@ jobs:
           client-id: ${{ vars.DOTNET_SDK_SYNC_APP_CLIENT_ID }}
           private-key: ${{ secrets.DOTNET_SDK_SYNC_APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
+          permission-contents: write
+          permission-pull-requests: write
 
       - name: Synchronize .NET SDK versions
         shell: bash

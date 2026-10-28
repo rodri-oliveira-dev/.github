@@ -109,6 +109,8 @@ Governance contract changes are version-gated on every Pull Request: changes to 
 
 The [`dotnet-sdk-sync.yml`](.github/workflows/dotnet-sdk-sync.yml) workflow provides centralized SDK maintenance for repositories accessible to the configured GitHub App.
 
+Cross-major recommendations and their non-automatic eligibility, risk, and security model are documented in the [.NET major-version migration recommendation policy](docs/dotnet-major-migration-policy.md).
+
 Its current policy is intentionally conservative:
 
 - checks only the repository-root `global.json`;

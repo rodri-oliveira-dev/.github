@@ -108,6 +108,8 @@ Mudanças no contrato de governança passam por verificação de versão em todo
 
 O workflow [`dotnet-sdk-sync.yml`](.github/workflows/dotnet-sdk-sync.yml) fornece manutenção centralizada de SDK para os repositórios acessíveis à GitHub App configurada.
 
+As recomendações entre versões principais e seus critérios não automáticos de elegibilidade, risco e segurança estão documentados na [política de recomendação para migração de versão principal do .NET](docs/dotnet-major-migration-policy.pt-BR.md).
+
 A política atual é deliberadamente conservadora:
 
 - verifica somente o `global.json` localizado na raiz do repositório;

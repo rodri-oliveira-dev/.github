@@ -200,6 +200,7 @@ append_project_fallback() {
       is_test: false,
       is_packable: false,
       output_type: "",
+      publication: {},
       status: $status,
       diagnostics: []
     }' >> "$projects_jsonl"
@@ -212,42 +213,14 @@ append_projects_from_report() {
   local exit_code="$4"
   local report_file="$5"
 
-  jq -c \
+  jq -c -L "$GITHUB_WORKSPACE/.github/scripts/automation" \
     --arg repository "$repository" \
     --arg visibility "$visibility" \
     --arg default_branch "$default_branch" \
-    --argjson exit_code "$exit_code" '
-    def text_or_empty(value): value // "";
-    . as $report
-    | ($report.dotNetSdk.configured.version // "") as $configured_sdk
-    | ($report.dotNetSdk.resolvedVersion // "") as $repo_resolved_sdk
-    | $report.projects[]?
-    | ([
-        .diagnostics[]?.severity,
-        (if $exit_code == 0 then empty else "warning" end)
-      ] | map((. // "") | ascii_downcase)) as $severities
-    | {
-        repository: $repository,
-        visibility: $visibility,
-        default_branch: $default_branch,
-        project_path: text_or_empty(.path),
-        project_name: text_or_empty(.name),
-        classification: (.classification.kind // "unknown"),
-        target_frameworks: (.targetFrameworks // []),
-        project_sdk: ((.sdks // []) | map(.name // empty) | join("; ")),
-        configured_dotnet_sdk: $configured_sdk,
-        resolved_dotnet_sdk: (.resolvedSdkVersion // $repo_resolved_sdk // ""),
-        is_test: (.isTestProject // false),
-        is_packable: (.isPackable // false),
-        output_type: text_or_empty(.outputType),
-        status: (
-          if any($severities[]; . == "error") then "error"
-          elif any($severities[]; . == "warning") then "warning"
-          else "ok"
-          end
-        ),
-        diagnostics: (.diagnostics // [])
-      }' "$report_file" >> "$projects_jsonl"
+    --argjson exit_code "$exit_code" \
+    'include "dotnet-inventory-project";
+    inventory_projects($repository; $visibility; $default_branch; $exit_code)' \
+    "$report_file" >> "$projects_jsonl"
 }
 
 write_summary_markdown() {
@@ -304,6 +277,11 @@ write_summary_markdown() {
           ["Library projects", .library_projects],
           ["Test projects", .test_projects],
           ["Unknown projects", .unknown_projects],
+          ["Self-contained projects", .self_contained_projects],
+          ["Publish-self-contained projects", .publish_self_contained_projects],
+          ["Native AOT projects", .aot_projects],
+          ["Trimmed projects", .trimmed_projects],
+          ["Projects with pinned runtime framework", .runtime_framework_version_projects],
           ["Inspection warnings/errors", .inspection_warnings_errors],
           ["Repository clone timeouts", .repository_clone_timeouts],
           ["Repository inspection timeouts", .repository_inspection_timeouts]
@@ -591,6 +569,11 @@ jq -n \
         library_projects: ($project_rows | map(select(.classification == "library")) | length),
         test_projects: ($project_rows | map(select(.classification == "test" or .is_test == true)) | length),
         unknown_projects: ($project_rows | map(select(.classification == "unknown")) | length),
+        self_contained_projects: ($project_rows | map(select(.publication.selfContained.state == "evaluated" and .publication.selfContained.value == true)) | length),
+        publish_self_contained_projects: ($project_rows | map(select(.publication.publishSelfContained.state == "evaluated" and .publication.publishSelfContained.value == true)) | length),
+        aot_projects: ($project_rows | map(select(.publication.publishAot.state == "evaluated" and .publication.publishAot.value == true)) | length),
+        trimmed_projects: ($project_rows | map(select(.publication.publishTrimmed.state == "evaluated" and .publication.publishTrimmed.value == true)) | length),
+        runtime_framework_version_projects: ($project_rows | map(select(.publication.runtimeFrameworkVersion.state == "evaluated" and ((.publication.runtimeFrameworkVersion.value // "") != ""))) | length),
         inspection_warnings_errors: $inspection_warnings_errors,
         repository_clone_timeouts: $repository_clone_timeouts,
         repository_inspection_timeouts: $repository_inspection_timeouts
@@ -603,6 +586,7 @@ jq -n \
 jq -r \
   --arg inspector_version "$INSPECTOR_VERSION" \
   --arg inspector_sha "$INSPECTOR_SHA" '
+  def scalar_or_empty: if . == null then "" else tostring end;
   ([
     "inspector_version",
     "inspector_sha",
@@ -619,6 +603,16 @@ jq -r \
     "is_test",
     "is_packable",
     "output_type",
+    "self_contained_state",
+    "self_contained_value",
+    "publish_self_contained_state",
+    "publish_self_contained_value",
+    "publish_aot_state",
+    "publish_aot_value",
+    "publish_trimmed_state",
+    "publish_trimmed_value",
+    "runtime_framework_version_state",
+    "runtime_framework_version",
     "status"
   ] | @csv),
   (.projects[]
@@ -638,6 +632,16 @@ jq -r \
         (.is_test | tostring),
         (.is_packable | tostring),
         .output_type,
+        (.publication.selfContained.state // ""),
+        (.publication.selfContained.value | scalar_or_empty),
+        (.publication.publishSelfContained.state // ""),
+        (.publication.publishSelfContained.value | scalar_or_empty),
+        (.publication.publishAot.state // ""),
+        (.publication.publishAot.value | scalar_or_empty),
+        (.publication.publishTrimmed.state // ""),
+        (.publication.publishTrimmed.value | scalar_or_empty),
+        (.publication.runtimeFrameworkVersion.state // ""),
+        (.publication.runtimeFrameworkVersion.value // ""),
         .status
       ]
     | @csv)

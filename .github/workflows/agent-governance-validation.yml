@@ -139,6 +139,8 @@ jobs:
           inspector_checkout=".github/scripts/automation/dotnet-inventory-checkout-inspector.sh"
           inspector_inventory=".github/scripts/automation/dotnet-inventory-inspection.sh"
 
+          bash .github/scripts/test-dotnet-inventory-project.sh
+
           inspector_version="$(sed -n 's/^[[:space:]]*INSPECTOR_VERSION: "\([^"]*\)"/\1/p' "$inventory" | head -n 1)"
           inspector_sha="$(sed -n 's/^[[:space:]]*INSPECTOR_SHA: "\([0-9a-f]*\)"/\1/p' "$inventory" | head -n 1)"
 
@@ -160,6 +162,10 @@ jobs:
           grep -Fq 'inspector_sha: $inspector_sha' "$inspector_inventory"
           grep -Fq '"inspector_version"' "$inspector_inventory"
           grep -Fq '"inspector_sha"' "$inspector_inventory"
+          grep -Fq 'include "dotnet-inventory-project"' "$inspector_inventory"
+          grep -Fq 'self_contained_projects:' "$inspector_inventory"
+          grep -Fq 'publish_self_contained_projects:' "$inspector_inventory"
+          grep -Fq 'runtime_framework_version_projects:' "$inspector_inventory"
 
           if grep -Eq -- '--branch[[:space:]]+(main|master)([[:space:]]|\\|$)' "$inspector_checkout"; then
             echo "::error::DotNetRepoInspector checkout must not use main or master."

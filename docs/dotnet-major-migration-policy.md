@@ -117,4 +117,3 @@ no untrusted MSBuild execution.
    do not reuse `chore/sync-dotnet-sdk`.
 5. Keep migration commits, validation, rollout, and rollback owned by each
    repository. Never auto-merge or silently retarget a major version.
-

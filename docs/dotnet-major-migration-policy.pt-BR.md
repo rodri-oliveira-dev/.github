@@ -109,4 +109,3 @@ sync não deve executar MSBuild não confiável.
    `chore/sync-dotnet-sdk`.
 5. Manter commits, validação, rollout e rollback sob responsabilidade de cada
    repositório. Nunca fazer auto-merge nem trocar silenciosamente a major.
-

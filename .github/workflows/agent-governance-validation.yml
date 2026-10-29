@@ -392,7 +392,7 @@ jobs:
 
           bash -n "$policy"
           grep -Fq 'select_automation_branch' "$sdk"
-          grep -Fq 'verify_automation_branch_ownership' "$upstream"
+          grep -Fq 'select_automation_branch' "$upstream"
           grep -Fq 'select_automation_branch' "$distribution"
           grep -Fq '<!-- automation-branch-owner: dotnet-sdk-sync/v1 -->' "$sdk"
           grep -Fq '<!-- automation-branch-owner: sync-upstream-agent-skills/v1 -->' "$upstream"
@@ -414,8 +414,8 @@ jobs:
             exit 1
           fi
 
-          grep -Fq -- '--force-with-lease="refs/heads/$SYNC_BRANCH:$AUTOMATION_BRANCH_SHA"' "$upstream"
-          grep -Fq -- '--force-with-lease="refs/heads/$SYNC_BRANCH:"' "$upstream"
+          grep -Fq -- '--force-with-lease="refs/heads/$active_branch:$AUTOMATION_BRANCH_SHA"' "$upstream"
+          grep -Fq -- '--force-with-lease="refs/heads/$active_branch:"' "$upstream"
           grep -Fq -- '--force-with-lease="refs/heads/$active_branch:$AUTOMATION_BRANCH_SHA"' "$distribution"
           grep -Fq -- '--force-with-lease="refs/heads/$active_branch:"' "$distribution"
 
@@ -433,9 +433,11 @@ jobs:
           grep -Fq 'cron: "20 12 * * 1"' "$sync_workflow"
           grep -Fq 'SOURCE_REPO: rodri-oliveira-dev/dotnet-library-template' "$sync_workflow"
           grep -Fq 'readonly SYNC_BRANCH="chore/sync-upstream-agent-skills"' "$sync"
+          grep -Fq 'managed_paths=' "$sync"
+          grep -Fq 'select_automation_branch' "$sync"
           grep -Fq 'gh pr create' "$sync"
-          grep -Fq -- '--force-with-lease="refs/heads/$SYNC_BRANCH:$AUTOMATION_BRANCH_SHA"' "$sync"
-          grep -Fq -- '--force-with-lease="refs/heads/$SYNC_BRANCH:"' "$sync"
+          grep -Fq -- '--force-with-lease="refs/heads/$active_branch:$AUTOMATION_BRANCH_SHA"' "$sync"
+          grep -Fq -- '--force-with-lease="refs/heads/$active_branch:"' "$sync"
 
           source .github/scripts/agent-governance-manifest.sh
           agent_governance_validate_manifest

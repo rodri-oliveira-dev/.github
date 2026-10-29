@@ -149,7 +149,12 @@ FAKE_REFS_JSON="$(refs "$branch" "$sha")"
 FAKE_PRS_JSON="$(pr open "$sha" "$marker")"
 FAKE_FILES_JSON="$(jq -cn '[{filename:"global.json"},{filename:"managed/skill.md"}]')"
 export FAKE_REFS_JSON FAKE_PRS_JSON FAKE_FILES_JSON
-verify_automation_branch_ownership "$repo" "$branch" "$base" "$marker" "$title" 
+verify_automation_branch_ownership "$repo" "$branch" "$base" "$marker" "$title" $'global.json\nmanaged/skill.md'
+[[ "$AUTOMATION_BRANCH_STATE" == "owned" ]]
+verify_automation_branch_ownership "$repo" "$branch" "$base" "$marker" "$title" "global.json"
+[[ "$AUTOMATION_BRANCH_STATE" == "modified" ]]
+
+# 6. Manual changes outside the managed file set invalidate ownership.
 reset_fixtures
 FAKE_REFS_JSON="$(refs "$branch" "$sha")"
 FAKE_PRS_JSON="$(pr open "$sha" "$marker")"
@@ -257,110 +262,5 @@ grep -Fq '"$managed_paths"; then' "$upstream"
 grep -Fq '"$AUTOMATION_BRANCH_STATE" == "owned_legacy"' "$upstream"
 grep -Fq 'origin "HEAD:refs/heads/$active_branch"' "$upstream"
 grep -Fq -- '--head "$active_branch"' "$upstream"
-
-echo "Automation ownership, orphan recovery, idempotency, race and dry-run regressions passed."
-global.json\nmanaged/skill.md'
-[[ "$AUTOMATION_BRANCH_STATE" == "owned" ]]
-verify_automation_branch_ownership "$repo" "$branch" "$base" "$marker" "$title" "global.json"
-[[ "$AUTOMATION_BRANCH_STATE" == "modified" ]]
-
-# 6. Manual changes outside the managed file set invalidate ownership.
-reset_fixtures
-FAKE_REFS_JSON="$(refs "$branch" "$sha")"
-FAKE_PRS_JSON="$(pr open "$sha" "$marker")"
-FAKE_FILES_JSON="$(jq -cn '[{filename:"global.json"},{filename:"README.md"}]')"
-export FAKE_REFS_JSON FAKE_PRS_JSON FAKE_FILES_JSON
-verify_automation_branch_ownership "$repo" "$branch" "$base" "$marker" "$title" "global.json"
-[[ "$AUTOMATION_BRANCH_STATE" == "modified" ]]
-if select_automation_branch "$repo" "$branch" "$base" "$marker" "$title" "global.json"; then
-  echo "::error::A manually modified open PR was recovered into a duplicate PR branch." >&2
-  exit 1
-fi
-[[ "$AUTOMATION_BRANCH_STATE" == "modified" ]]
-
-# 7. Two concurrent open PR references are a conflict.
-reset_fixtures
-FAKE_REFS_JSON="$(refs "$branch" "$sha")"
-FAKE_PRS_JSON="$(jq -cn --argjson one "$(pr open "$sha" "$marker")" '$one + ($one | map(.number = 43))')"
-export FAKE_REFS_JSON FAKE_PRS_JSON
-verify_automation_branch_ownership "$repo" "$branch" "$base" "$marker" "$title" "global.json"
-[[ "$AUTOMATION_BRANCH_STATE" == "conflict_open" ]]
-if select_automation_branch "$repo" "$branch" "$base" "$marker" "$title" "global.json"; then
-  echo "::error::Concurrent open PRs were recovered into another PR branch." >&2
-  exit 1
-fi
-
-# 8 and 11. Recovery is deterministic, and a later run reuses its proven PR.
-reset_fixtures
-FAKE_REFS_JSON="$(refs "$branch" "$sha")"
-FAKE_PRS_JSON="$(pr closed "$sha" "$marker")"
-export FAKE_REFS_JSON FAKE_PRS_JSON
-select_automation_branch "$repo" "$branch" "$base" "$marker" "$title" "global.json"
-[[ "$AUTOMATION_RECOVERY_USED" == "true" ]]
-[[ "$AUTOMATION_BRANCH_NAME" == "$recovery_branch" && "$AUTOMATION_BRANCH_STATE" == "absent" ]]
-
-FAKE_RECOVERY_REFS_JSON="$(refs "$recovery_branch" "$other_sha")"
-FAKE_RECOVERY_PRS_JSON="$(pr open "$other_sha" "$marker" | jq --arg branch "$recovery_branch" '.[].head.ref = $branch')"
-export FAKE_RECOVERY_REFS_JSON FAKE_RECOVERY_PRS_JSON
-select_automation_branch "$repo" "$branch" "$base" "$marker" "$title" "global.json"
-[[ "$AUTOMATION_BRANCH_NAME" == "$recovery_branch" && "$AUTOMATION_BRANCH_STATE" == "owned" ]]
-[[ "$AUTOMATION_PR_NUMBER" == "42" ]]
-
-# 9. A PR failure after push is retained and reported; no cleanup/delete exists.
-grep -Fq 'branch was pushed but PR creation failed; branch retained for manual recovery' "$distribution"
-grep -Fq 'was pushed but a PR could not be opened; the branch was retained for safe recovery' "$sdk"
-if grep -Eq -- '--method[[:space:]]+DELETE|git[[:space:]]+push[^[:cntrl:]]+--delete' "$policy" "$sdk" "$distribution"; then
-  echo "::error::Automation branch cleanup must never delete historical refs." >&2
-  exit 1
-fi
-
-# 10. An exact-head lease rejects a branch changed after verification.
-remote="$scratch/remote.git"
-seed="$scratch/seed"
-racer="$scratch/racer"
-git init --quiet --bare "$remote"
-git clone --quiet "$remote" "$seed"
-git -C "$seed" config user.name fixture
-git -C "$seed" config user.email fixture@example.invalid
-echo base > "$seed/file.txt"
-git -C "$seed" add file.txt
-git -C "$seed" commit --quiet -m base
-git -C "$seed" push --quiet origin HEAD:main
-git -C "$seed" checkout --quiet -b "$branch"
-echo owned >> "$seed/file.txt"
-git -C "$seed" commit --quiet -am owned
-git -C "$seed" push --quiet origin "HEAD:refs/heads/$branch"
-captured_sha="$(git ls-remote "$remote" "refs/heads/$branch" | awk '{print $1}')"
-git clone --quiet --branch "$branch" "$remote" "$racer"
-git -C "$racer" config user.name racer
-git -C "$racer" config user.email racer@example.invalid
-echo race >> "$racer/file.txt"
-git -C "$racer" commit --quiet -am race
-git -C "$racer" push --quiet origin "HEAD:refs/heads/$branch"
-echo candidate >> "$seed/file.txt"
-git -C "$seed" commit --quiet -am candidate
-if git -C "$seed" push --quiet --force-with-lease="refs/heads/$branch:$captured_sha" \
-  origin "HEAD:refs/heads/$branch" 2>/dev/null; then
-  echo "::error::A stale exact-head lease overwrote a changed branch." >&2
-  exit 1
-fi
-
-# 12. Dry-run exits before ownership lookup, git setup, pushes or PR mutation.
-dry_run_line="$(grep -n 'if \[\[ "$DRY_RUN" == "true" \]\]' "$sdk" | tail -n 1 | cut -d: -f1)"
-selection_line="$(grep -n 'select_automation_branch' "$sdk" | tail -n 1 | cut -d: -f1)"
-[[ "$dry_run_line" -lt "$selection_line" ]]
-dry_run_line="$(grep -n 'if \[\[ "$DRY_RUN" == "true" \]\]' "$distribution" | tail -n 1 | cut -d: -f1)"
-selection_line="$(grep -n 'select_automation_branch' "$distribution" | tail -n 1 | cut -d: -f1)"
-[[ "$dry_run_line" -lt "$selection_line" ]]
-
-# Mutation scope and lease contracts remain narrow.
-grep -Fq 'git -C "$sdk_worktree" add -- "$GLOBAL_JSON_PATH"' "$sdk"
-grep -Fq 'git -C "$worktree" add -- "${changed_targets[@]}"' "$distribution"
-grep -Fq -- '--force-with-lease="refs/heads/$active_branch:$branch_parent_sha"' "$sdk"
-grep -Fq -- '--force-with-lease="refs/heads/$active_branch:$AUTOMATION_BRANCH_SHA"' "$distribution"
-if grep -Eq 'git[[:space:]].*push[[:space:]].*--force([[:space:]]|$)' "$sdk" "$distribution"; then
-  echo "::error::Unprotected force push detected." >&2
-  exit 1
-fi
 
 echo "Automation ownership, orphan recovery, idempotency, race and dry-run regressions passed."

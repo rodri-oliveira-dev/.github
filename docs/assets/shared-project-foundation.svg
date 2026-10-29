@@ -1,0 +1,83 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 410" role="img" aria-labelledby="title desc">
+  <title id="title">Shared foundation for projects</title>
+  <desc id="desc">A central shared hub connects guidance, automation, security and collaboration across separate repositories.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#F7FAFF"/>
+      <stop offset="1" stop-color="#EFFAF8"/>
+    </linearGradient>
+    <linearGradient id="core" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#3468DF"/>
+      <stop offset="1" stop-color="#269DAD"/>
+    </linearGradient>
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="170%">
+      <feDropShadow dx="0" dy="7" stdDeviation="12" flood-color="#203E62" flood-opacity=".10"/>
+    </filter>
+  </defs>
+  <rect width="1200" height="410" rx="26" fill="url(#bg)"/>
+  <circle cx="104" cy="52" r="88" fill="#DFEBFF" opacity=".55"/>
+  <circle cx="1106" cy="362" r="112" fill="#D8F4EF" opacity=".55"/>
+  <path d="M345 121 C415 121 408 172 465 172 M345 291 C412 291 410 242 465 242 M735 172 C791 172 790 121 855 121 M735 242 C792 242 795 291 855 291" fill="none" stroke="#8EB5DB" stroke-width="5" stroke-linecap="round"/>
+  <g stroke="#6C9FE5" stroke-width="3" fill="none" stroke-linecap="round">
+    <path d="m455 164 11 8-12 7"/>
+    <path d="m455 234 11 8-12 7"/>
+    <path d="m846 113 11 8-12 7"/>
+    <path d="m846 283 11 8-12 7"/>
+  </g>
+  <g filter="url(#shadow)">
+    <rect x="55" y="66" width="290" height="112" rx="20" fill="#FFFFFF"/>
+    <rect x="55" y="232" width="290" height="112" rx="20" fill="#FFFFFF"/>
+    <rect x="855" y="66" width="290" height="112" rx="20" fill="#FFFFFF"/>
+    <rect x="855" y="232" width="290" height="112" rx="20" fill="#FFFFFF"/>
+    <rect x="448" y="91" width="304" height="228" rx="33" fill="url(#core)"/>
+  </g>
+  <g fill="none" stroke-width="5" stroke-linecap="round" stroke-linejoin="round">
+    <g stroke="#376BD7">
+      <rect x="88" y="92" width="58" height="58" rx="13" fill="#E8F0FF" stroke="none"/>
+      <path d="M107 103h18l10 10v25h-28z M125 103v11h10 M114 124h14 M114 132h14" stroke-width="3.3"/>
+    </g>
+    <g stroke="#249B92">
+      <rect x="88" y="258" width="58" height="58" rx="13" fill="#E2F7F2" stroke="none"/>
+      <path d="M117 268 135 276v13c0 11-8 18-18 23-10-5-18-12-18-23v-13z" stroke-width="3.2"/>
+      <path d="m108 289 6 6 12-13" stroke-width="3.5"/>
+    </g>
+    <g stroke="#3973DD">
+      <rect x="888" y="92" width="58" height="58" rx="13" fill="#E9F1FF" stroke="none"/>
+      <circle cx="908" cy="112" r="5" stroke-width="3"/>
+      <circle cx="927" cy="128" r="5" stroke-width="3"/>
+      <circle cx="908" cy="138" r="5" stroke-width="3"/>
+      <path d="M908 117v16 M913 112h8c10 0 11 8 11 11" stroke-width="3"/>
+    </g>
+    <g stroke="#259D9C">
+      <rect x="888" y="258" width="58" height="58" rx="13" fill="#E2F7F5" stroke="none"/>
+      <circle cx="907" cy="278" r="6" stroke-width="3.2"/>
+      <circle cx="928" cy="280" r="5" stroke-width="3.2"/>
+      <path d="M895 300c0-10 6-14 12-14 8 0 14 5 14 14 M920 292c8-6 16-1 16 8" stroke-width="3.2"/>
+    </g>
+  </g>
+  <g font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Arial,sans-serif" fill="#27415C">
+    <text x="165" y="115" font-size="17" font-weight="700">Guidance</text>
+    <text x="165" y="138" font-size="13" fill="#6D8499">Shared standards</text>
+    <text x="165" y="156" font-size="13" fill="#6D8499">and documentation</text>
+    <text x="165" y="281" font-size="17" font-weight="700">Security</text>
+    <text x="165" y="304" font-size="13" fill="#6D8499">Reviewable checks</text>
+    <text x="165" y="322" font-size="13" fill="#6D8499">and safer changes</text>
+    <text x="964" y="115" font-size="17" font-weight="700">Automation</text>
+    <text x="964" y="138" font-size="13" fill="#6D8499">Updates and</text>
+    <text x="964" y="156" font-size="13" fill="#6D8499">project insights</text>
+    <text x="964" y="281" font-size="17" font-weight="700">Collaboration</text>
+    <text x="964" y="304" font-size="13" fill="#6D8499">Independent projects,</text>
+    <text x="964" y="322" font-size="13" fill="#6D8499">shared practices</text>
+  </g>
+  <g fill="#FFFFFF" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Arial,sans-serif">
+    <rect x="543" y="133" width="114" height="52" rx="15" fill="#FFFFFF" fill-opacity=".14" stroke="#FFFFFF" stroke-opacity=".55" stroke-width="1.5"/>
+    <path d="M568 159h19m-10-9v18" stroke="#FFFFFF" stroke-width="3.4" stroke-linecap="round"/>
+    <path d="m599 155 7 5-7 5m33-10-7 5 7 5" stroke="#FFFFFF" stroke-width="3.1" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+    <text x="600" y="233" font-size="41" font-weight="700" letter-spacing="-1">.github</text>
+    <text x="600" y="260" font-size="15" opacity=".92">A shared project foundation</text>
+  </g>
+  <g fill="#FFFFFF" opacity=".8">
+    <circle cx="482" cy="126" r="4"/><circle cx="719" cy="285" r="4"/>
+    <circle cx="505" cy="289" r="2.5"/><circle cx="704" cy="119" r="3"/>
+  </g>
+</svg>

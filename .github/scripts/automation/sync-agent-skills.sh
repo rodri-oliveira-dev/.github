@@ -128,14 +128,22 @@ if [[ "$DRY_RUN" == "true" ]]; then
   exit 0
 fi
 
-if ! verify_automation_branch_ownership \
+# All manifest paths define the ownership boundary, not only this run's drift.
+managed_paths="$(printf '%s\n' "${target_files[@]}")"
+if ! select_automation_branch \
   "$TARGET_REPO" \
   "$SYNC_BRANCH" \
   "main" \
   "$OWNERSHIP_MARKER" \
-  "$PR_TITLE"; then
+  "$PR_TITLE" \
+  "$managed_paths"; then
   echo "::error title=Automation branch ownership rejected::$AUTOMATION_OWNERSHIP_ERROR"
   exit 1
+fi
+active_branch="$AUTOMATION_BRANCH_NAME"
+if [[ "$AUTOMATION_RECOVERY_USED" == "true" ]]; then
+  echo "::notice title=Upstream skill branch collision recovered::$SYNC_BRANCH remains untouched; using $active_branch ($AUTOMATION_RECOVERY_REASON)."
+  printf '\nBranch collision recovered on %s; the reserved branch was preserved.\n' "$active_branch" >> "$GITHUB_STEP_SUMMARY"
 fi
 
 git config user.name "agent-governance-sync[bot]"
@@ -144,18 +152,18 @@ git add -- "${target_files[@]}"
 git commit -m "$PR_TITLE"
 
 gh auth setup-git
-if [[ "$AUTOMATION_BRANCH_STATE" == "owned" ]]; then
+if [[ "$AUTOMATION_BRANCH_STATE" == "owned" || "$AUTOMATION_BRANCH_STATE" == "owned_legacy" ]]; then
   if ! git push \
-    --force-with-lease="refs/heads/$SYNC_BRANCH:$AUTOMATION_BRANCH_SHA" \
-    --set-upstream origin "$SYNC_BRANCH"; then
-    echo "::error title=Automation branch changed during sync::$TARGET_REPO/$SYNC_BRANCH changed after provenance was verified."
+    --force-with-lease="refs/heads/$active_branch:$AUTOMATION_BRANCH_SHA" \
+    origin "HEAD:refs/heads/$active_branch"; then
+    echo "::error title=Automation branch changed during sync::$TARGET_REPO/$active_branch changed after provenance was verified."
     exit 1
   fi
 else
   if ! git push \
-    --force-with-lease="refs/heads/$SYNC_BRANCH:" \
-    --set-upstream origin "$SYNC_BRANCH"; then
-    echo "::error title=Automation branch creation race::$TARGET_REPO/$SYNC_BRANCH was created after provenance verification."
+    --force-with-lease="refs/heads/$active_branch:" \
+    origin "HEAD:refs/heads/$active_branch"; then
+    echo "::error title=Automation branch creation race::$TARGET_REPO/$active_branch was created after provenance verification."
     exit 1
   fi
 fi
@@ -194,7 +202,7 @@ pr_body="$(mktemp)"
   echo "- The repository's Agent governance validation workflow remains the merge gate."
 } > "$pr_body"
 
-if [[ "$AUTOMATION_BRANCH_STATE" == "owned" ]]; then
+if [[ "$AUTOMATION_BRANCH_STATE" == "owned" || "$AUTOMATION_BRANCH_STATE" == "owned_legacy" ]]; then
   gh pr edit "$AUTOMATION_PR_NUMBER" \
     --repo "$TARGET_REPO" \
     --title "$PR_TITLE" \
@@ -206,7 +214,7 @@ else
     gh pr create \
       --repo "$TARGET_REPO" \
       --base main \
-      --head "$SYNC_BRANCH" \
+      --head "$active_branch" \
       --title "$PR_TITLE" \
       --body-file "$pr_body"
   )"

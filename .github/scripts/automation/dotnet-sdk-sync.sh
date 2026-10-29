@@ -146,6 +146,8 @@ write_summary() {
     echo "| Files updated | $files_updated |"
     echo "| Pull requests created | $pull_requests_created |"
     echo "| Pull requests updated | $pull_requests_updated |"
+    echo "| Pull requests reused | $pull_requests_reused |"
+    echo "| Branch conflicts recovered | $branch_conflicts_recovered |"
     echo "| Repositories skipped | $repositories_skipped |"
     echo "| Non-public repositories skipped | $non_public_repositories_skipped |"
     echo "| SDK policy errors | $sdk_policy_errors |"
@@ -182,6 +184,8 @@ dry_run_updates=0
 repositories_with_updates=0
 pull_requests_created=0
 pull_requests_updated=0
+pull_requests_reused=0
+branch_conflicts_recovered=0
 repositories_skipped=0
 non_public_repositories_skipped=0
 sdk_policy_errors=0
@@ -350,18 +354,28 @@ while IFS="$tab" read -r visibility_marker repo default_branch archived fork; do
     continue
   fi
 
-  if ! verify_automation_branch_ownership \
+  if ! select_automation_branch \
     "$repo" \
     "$UPDATE_BRANCH" \
     "$default_branch" \
-    "$OWNERSHIP_MARKER"; then
+    "$OWNERSHIP_MARKER" \
+    "" \
+    "$GLOBAL_JSON_PATH"; then
     ownership_errors=$((ownership_errors + 1))
     echo "::error title=Automation branch ownership rejected::$repo: $AUTOMATION_OWNERSHIP_ERROR"
-    log_result "$repo" "Skipped — reserved branch ownership could not be proven"
+    log_result "$repo" "Security block — no automation branch is safe to mutate"
     continue
   fi
 
-  if [[ "$AUTOMATION_BRANCH_STATE" == "owned" ]]; then
+  active_branch="$AUTOMATION_BRANCH_NAME"
+  recovery_note=""
+  if [[ "$AUTOMATION_RECOVERY_USED" == "true" ]]; then
+    branch_conflicts_recovered=$((branch_conflicts_recovered + 1))
+    recovery_note="; recovered on $active_branch"
+    echo "::notice title=Automation branch collision recovered::$repo left $UPDATE_BRANCH untouched and selected $active_branch ($AUTOMATION_RECOVERY_REASON)."
+  fi
+
+  if [[ "$AUTOMATION_BRANCH_STATE" == "owned" || "$AUTOMATION_BRANCH_STATE" == "owned_legacy" ]]; then
     branch_parent_sha="$AUTOMATION_BRANCH_SHA"
     pr_action="updated"
   else
@@ -452,11 +466,11 @@ while IFS="$tab" read -r visibility_marker repo default_branch archived fork; do
     if ! gh api \
       --method POST \
       "repos/$repo/git/refs" \
-      -f ref="refs/heads/$UPDATE_BRANCH" \
+      -f ref="refs/heads/$active_branch" \
       -f sha="$default_sha" \
       >/dev/null; then
       ownership_errors=$((ownership_errors + 1))
-      echo "::error title=Automation branch creation race::$repo/$UPDATE_BRANCH appeared or changed after ownership verification."
+      echo "::error title=Automation branch creation race::$repo/$active_branch appeared or changed after ownership verification."
       log_result "$repo" "Skipped — automation branch changed during creation"
       continue
     fi
@@ -476,18 +490,18 @@ while IFS="$tab" read -r visibility_marker repo default_branch archived fork; do
   fi
 
   if ! git -C "$sdk_worktree" fetch --quiet --depth=1 \
-    origin "refs/heads/$UPDATE_BRANCH:refs/remotes/origin/$UPDATE_BRANCH"; then
+    origin "refs/heads/$active_branch:refs/remotes/origin/$active_branch"; then
     repository_errors=$((repository_errors + 1))
-    echo "::error title=Automation branch fetch failed::Unable to fetch $repo/$UPDATE_BRANCH after ownership verification."
+    echo "::error title=Automation branch fetch failed::Unable to fetch $repo/$active_branch after ownership verification."
     log_result "$repo" "Skipped — unable to fetch proven automation branch"
     rm -rf -- "$sdk_worktree"
     sdk_worktree=""
     continue
   fi
 
-  if ! fetched_branch_sha="$(git -C "$sdk_worktree" rev-parse "refs/remotes/origin/$UPDATE_BRANCH")"; then
+  if ! fetched_branch_sha="$(git -C "$sdk_worktree" rev-parse "refs/remotes/origin/$active_branch")"; then
     repository_errors=$((repository_errors + 1))
-    echo "::error title=SDK branch resolution failed::$repo/$UPDATE_BRANCH could not be resolved."
+    echo "::error title=SDK branch resolution failed::$repo/$active_branch could not be resolved."
     log_result "$repo" "Error — branch resolution failed"
     rm -rf -- "$sdk_worktree"
     sdk_worktree=""
@@ -495,7 +509,7 @@ while IFS="$tab" read -r visibility_marker repo default_branch archived fork; do
   fi
   if [[ "$fetched_branch_sha" != "$branch_parent_sha" ]]; then
     ownership_errors=$((ownership_errors + 1))
-    echo "::error title=Automation branch changed before SDK refresh::$repo/$UPDATE_BRANCH moved after ownership verification."
+    echo "::error title=Automation branch changed before SDK refresh::$repo/$active_branch moved after ownership verification."
     log_result "$repo" "Skipped — automation branch changed before SDK refresh"
     rm -rf -- "$sdk_worktree"
     sdk_worktree=""
@@ -504,7 +518,7 @@ while IFS="$tab" read -r visibility_marker repo default_branch archived fork; do
 
   if ! git -C "$sdk_worktree" checkout --quiet --detach "$branch_parent_sha"; then
     repository_errors=$((repository_errors + 1))
-    echo "::error title=SDK checkout failed::$repo/$UPDATE_BRANCH could not be checked out."
+    echo "::error title=SDK checkout failed::$repo/$active_branch could not be checked out."
     log_result "$repo" "Error — checkout failed"
     rm -rf -- "$sdk_worktree"
     sdk_worktree=""
@@ -513,7 +527,7 @@ while IFS="$tab" read -r visibility_marker repo default_branch archived fork; do
 
   if [[ ! -f "$sdk_worktree/$GLOBAL_JSON_PATH" ]]; then
     ownership_errors=$((ownership_errors + 1))
-    echo "::error title=Unexpected SDK branch state::$repo/$UPDATE_BRANCH no longer contains $GLOBAL_JSON_PATH."
+    echo "::error title=Unexpected SDK branch state::$repo/$active_branch no longer contains $GLOBAL_JSON_PATH."
     log_result "$repo" "Skipped — automation branch no longer contains root global.json"
     rm -rf -- "$sdk_worktree"
     sdk_worktree=""
@@ -524,7 +538,7 @@ while IFS="$tab" read -r visibility_marker repo default_branch archived fork; do
 
   if ! jq -e . >/dev/null 2>&1 <<< "$branch_content"; then
     sdk_policy_errors=$((sdk_policy_errors + 1))
-    echo "::error title=Invalid automation branch global.json::$repo/$UPDATE_BRANCH contains invalid JSON."
+    echo "::error title=Invalid automation branch global.json::$repo/$active_branch contains invalid JSON."
     log_result "$repo" "Error — automation branch global.json is invalid"
     rm -rf -- "$sdk_worktree"
     sdk_worktree=""
@@ -534,7 +548,7 @@ while IFS="$tab" read -r visibility_marker repo default_branch archived fork; do
   branch_version="$(jq -r '.sdk.version // empty' <<< "$branch_content")"
   if ! sdk_update_relation "$branch_version" "$latest"; then
     sdk_policy_errors=$((sdk_policy_errors + 1))
-    echo "::error title=Invalid automation branch SDK::$repo/$UPDATE_BRANCH: $SDK_POLICY_ERROR"
+    echo "::error title=Invalid automation branch SDK::$repo/$active_branch: $SDK_POLICY_ERROR"
     log_result "$repo" "Error — automation branch SDK is incompatible with target"
     rm -rf -- "$sdk_worktree"
     sdk_worktree=""
@@ -564,6 +578,7 @@ while IFS="$tab" read -r visibility_marker repo default_branch archived fork; do
         else
           log_result "$repo" "PR #$AUTOMATION_PR_NUMBER already proposes latest SDK $latest with current metadata"
         fi
+        pull_requests_reused=$((pull_requests_reused + 1))
         rm -f -- "$pr_body"
         pr_body=""
         rm -rf -- "$sdk_worktree"
@@ -572,7 +587,7 @@ while IFS="$tab" read -r visibility_marker repo default_branch archived fork; do
       fi
 
       sdk_policy_errors=$((sdk_policy_errors + 1))
-      echo "::error title=Unexpected SDK branch state::$repo/$UPDATE_BRANCH was newly created but already contains target SDK $latest."
+      echo "::error title=Unexpected SDK branch state::$repo/$active_branch was newly created but already contains target SDK $latest."
       log_result "$repo" "Error — newly created automation branch already has target SDK"
       rm -f -- "$pr_body"
       pr_body=""
@@ -582,7 +597,7 @@ while IFS="$tab" read -r visibility_marker repo default_branch archived fork; do
       ;;
     newer)
       sdk_policy_errors=$((sdk_policy_errors + 1))
-      echo "::error title=Automation branch SDK newer than target::$repo/$UPDATE_BRANCH proposes $branch_version while metadata target is $latest."
+      echo "::error title=Automation branch SDK newer than target::$repo/$active_branch proposes $branch_version while metadata target is $latest."
       log_result "$repo" "Error — automation branch SDK is newer than metadata target"
       rm -f -- "$pr_body"
       pr_body=""
@@ -633,10 +648,10 @@ while IFS="$tab" read -r visibility_marker repo default_branch archived fork; do
   fi
 
   if ! git -C "$sdk_worktree" push --quiet \
-    --force-with-lease="refs/heads/$UPDATE_BRANCH:$branch_parent_sha" \
-    origin "HEAD:refs/heads/$UPDATE_BRANCH"; then
+    --force-with-lease="refs/heads/$active_branch:$branch_parent_sha" \
+    origin "HEAD:refs/heads/$active_branch"; then
     ownership_errors=$((ownership_errors + 1))
-    echo "::error title=Automation branch changed during SDK refresh::$repo/$UPDATE_BRANCH no longer matches the proven parent SHA."
+    echo "::error title=Automation branch changed during SDK refresh::$repo/$active_branch no longer matches the proven parent SHA."
     log_result "$repo" "Skipped — automation branch changed during SDK refresh"
     rm -f -- "$pr_body"
     pr_body=""
@@ -662,26 +677,27 @@ while IFS="$tab" read -r visibility_marker repo default_branch archived fork; do
       pull_requests_updated=$((pull_requests_updated + 1))
       log_result "$repo" "PR metadata updated: $RECONCILED_PR_URL ($current → $latest)"
     else
-      log_result "$repo" "PR branch refreshed: $RECONCILED_PR_URL ($current → $latest); metadata already current"
+      log_result "$repo" "PR branch refreshed: $RECONCILED_PR_URL ($current → $latest); metadata already current$recovery_note"
     fi
+    pull_requests_reused=$((pull_requests_reused + 1))
   else
     if ! pr_url="$(
       gh pr create \
         --repo "$repo" \
         --base "$default_branch" \
-        --head "$UPDATE_BRANCH" \
+        --head "$active_branch" \
         --title "$desired_pr_title" \
         --body-file "$pr_body"
     )"; then
       repository_errors=$((repository_errors + 1))
-      echo "::error title=SDK PR creation failed::$repo/$UPDATE_BRANCH was pushed but a PR could not be opened; the reserved branch was left untouched for manual recovery."
+      echo "::error title=SDK PR creation failed::$repo/$active_branch was pushed but a PR could not be opened; the branch was retained for safe recovery."
       log_result "$repo" "Error — PR creation failed; branch requires manual recovery"
       rm -f -- "$pr_body"
       pr_body=""
       continue
     fi
     pull_requests_created=$((pull_requests_created + 1))
-    log_result "$repo" "PR created: $pr_url ($current → $latest)"
+    log_result "$repo" "PR created: $pr_url ($current → $latest$recovery_note)"
   fi
 
   rm -f -- "$pr_body"

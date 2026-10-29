@@ -28,6 +28,7 @@ for script in .github/scripts/automation/*.sh; do bash -n "$script"; done
 bash .github/scripts/test-automation-extraction.sh
 bash .github/scripts/test-inventory-timeout.sh
 bash .github/scripts/test-batch-failure-isolation.sh
+bash .github/scripts/test-automation-branch-ownership.sh
 bash .github/scripts/test-agent-governance-manifest.sh
 bash .github/scripts/test-agent-governance-version.sh
 ruby .github/scripts/test-agent-governance-semantic.rb
@@ -39,7 +40,10 @@ a sanitized discovery artifact, injected credential and malformed artifact. The
 inventory harness executes the real inspection script with mocked Git and dotnet
 commands, including hung inspection, timeout classification, process-group cleanup,
 batch continuation and JSON/CSV/Step Summary output. Retry and branch-provenance
-regression checks remain in the shared governance workflow. Checks return nonzero
+regression checks remain in the shared governance workflow. The ownership harness
+uses a mocked GitHub API plus local bare Git repositories to cover historical
+branches, legacy PRs, deterministic recovery, idempotency and exact-lease races.
+Checks return nonzero
 on failure, emit actionable diagnostics, and do not access production repositories.
 
 For manual operational dry-runs, use the existing `workflow_dispatch` inputs for

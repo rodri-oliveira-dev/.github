@@ -59,6 +59,9 @@ repositories_current=0
 repositories_with_drift=0
 pull_requests_created=0
 pull_requests_updated=0
+pull_requests_reused=0
+branch_conflicts_recovered=0
+ownership_blocks=0
 repository_errors=0
 
 {
@@ -306,36 +309,53 @@ while IFS=$'\t' read -r repo default_branch archived fork visibility; do
     continue
   fi
 
-  if ! verify_automation_branch_ownership \
+  # Ownership covers every managed consumer path, not just this run's drift.
+  # Staging remains restricted to changed_targets above.
+  managed_paths="$(
+    for mapping in "${mappings[@]}"; do
+      IFS='|' read -r _ _ managed_consumer_path <<< "$mapping"
+      printf '%s\n' "$managed_consumer_path"
+    done
+  )"
+  if ! select_automation_branch \
     "$repo" \
     "$SYNC_BRANCH" \
     "$default_branch" \
     "$OWNERSHIP_MARKER" \
-    "$PR_TITLE"; then
+    "$PR_TITLE" \
+    "$managed_paths"; then
     echo "::error title=Automation branch ownership rejected::$repo: $AUTOMATION_OWNERSHIP_ERROR"
-    repository_errors=$((repository_errors + 1))
-    log_result "$repo" "Ownership error — reserved branch left untouched"
+    ownership_blocks=$((ownership_blocks + 1))
+    log_result "$repo" "Security block — no automation branch is safe to mutate"
     rm -rf "$worktree"
     continue
   fi
 
-  if [[ "$AUTOMATION_BRANCH_STATE" == "owned" ]]; then
+  active_branch="$AUTOMATION_BRANCH_NAME"
+  recovery_note=""
+  if [[ "$AUTOMATION_RECOVERY_USED" == "true" ]]; then
+    branch_conflicts_recovered=$((branch_conflicts_recovered + 1))
+    recovery_note="; recovered on $active_branch"
+    echo "::notice title=Automation branch collision recovered::$repo left $SYNC_BRANCH untouched and selected $active_branch ($AUTOMATION_RECOVERY_REASON)."
+  fi
+
+  if [[ "$AUTOMATION_BRANCH_STATE" == "owned" || "$AUTOMATION_BRANCH_STATE" == "owned_legacy" ]]; then
     if ! git -C "$worktree" push --quiet \
-      --force-with-lease="refs/heads/$SYNC_BRANCH:$AUTOMATION_BRANCH_SHA" \
-      origin "HEAD:refs/heads/$SYNC_BRANCH"; then
-      echo "::error title=Automation branch changed during distribution::$repo/$SYNC_BRANCH changed after provenance was verified."
-      repository_errors=$((repository_errors + 1))
-      log_result "$repo" "Ownership race — remote branch changed"
+      --force-with-lease="refs/heads/$active_branch:$AUTOMATION_BRANCH_SHA" \
+      origin "HEAD:refs/heads/$active_branch"; then
+      echo "::error title=Automation branch changed during distribution::$repo/$active_branch changed after provenance was verified."
+      ownership_blocks=$((ownership_blocks + 1))
+      log_result "$repo" "Security block — automation branch changed after verification"
       rm -rf "$worktree"
       continue
     fi
   else
     if ! git -C "$worktree" push --quiet \
-      --force-with-lease="refs/heads/$SYNC_BRANCH:" \
-      origin "HEAD:refs/heads/$SYNC_BRANCH"; then
-      echo "::error title=Automation branch creation race::$repo/$SYNC_BRANCH was created after provenance verification."
-      repository_errors=$((repository_errors + 1))
-      log_result "$repo" "Ownership race — reserved branch appeared"
+      --force-with-lease="refs/heads/$active_branch:" \
+      origin "HEAD:refs/heads/$active_branch"; then
+      echo "::error title=Automation branch creation race::$repo/$active_branch was created after provenance verification."
+      ownership_blocks=$((ownership_blocks + 1))
+      log_result "$repo" "Security block — automation branch appeared after verification"
       rm -rf "$worktree"
       continue
     fi
@@ -370,7 +390,7 @@ while IFS=$'\t' read -r repo default_branch archived fork visibility; do
     echo "- Repository-specific files outside these managed skill paths are not changed."
   } > "$pr_body"
 
-  if [[ "$AUTOMATION_BRANCH_STATE" == "owned" ]]; then
+  if [[ "$AUTOMATION_BRANCH_STATE" == "owned" || "$AUTOMATION_BRANCH_STATE" == "owned_legacy" ]]; then
     if ! gh pr edit "$AUTOMATION_PR_NUMBER" \
       --repo "$repo" \
       --title "$PR_TITLE" \
@@ -384,13 +404,14 @@ while IFS=$'\t' read -r repo default_branch archived fork visibility; do
       continue
     fi
     pull_requests_updated=$((pull_requests_updated + 1))
-    log_result "$repo" "PR updated: $pr_url ($changed_list)"
+    pull_requests_reused=$((pull_requests_reused + 1))
+    log_result "$repo" "PR updated: $pr_url ($changed_list$recovery_note)"
   else
     if ! pr_url="$(
       gh pr create \
         --repo "$repo" \
         --base "$default_branch" \
-        --head "$SYNC_BRANCH" \
+        --head "$active_branch" \
         --title "$PR_TITLE" \
         --body-file "$pr_body"
     )"; then
@@ -402,7 +423,7 @@ while IFS=$'\t' read -r repo default_branch archived fork visibility; do
       continue
     fi
     pull_requests_created=$((pull_requests_created + 1))
-    log_result "$repo" "PR created: $pr_url ($changed_list)"
+    log_result "$repo" "PR created: $pr_url ($changed_list$recovery_note)"
   fi
 
   rm -f "$pr_body"
@@ -422,10 +443,20 @@ done < "$repositories_file"
   echo "| Repositories with drift | $repositories_with_drift |"
   echo "| Pull Requests created | $pull_requests_created |"
   echo "| Pull Requests updated | $pull_requests_updated |"
+  echo "| Pull Requests reused | $pull_requests_reused |"
+  echo "| Branch conflicts recovered | $branch_conflicts_recovered |"
+  echo "| Security blocks | $ownership_blocks |"
   echo "| Repository errors | $repository_errors |"
 } >> "$GITHUB_STEP_SUMMARY"
 
+if [[ "$ownership_blocks" -gt 0 ]]; then
+  echo "::error::$ownership_blocks repository mutation(s) were blocked because no branch had proven automation ownership."
+fi
+
 if [[ "$repository_errors" -gt 0 ]]; then
   echo "::error::$repository_errors repository distribution operation(s) failed."
+fi
+
+if [[ "$ownership_blocks" -gt 0 || "$repository_errors" -gt 0 ]]; then
   exit 1
 fi

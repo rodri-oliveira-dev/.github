@@ -309,7 +309,14 @@ while IFS=$'\t' read -r repo default_branch archived fork visibility; do
     continue
   fi
 
-  managed_paths="$(printf '%s\n' "${changed_targets[@]}")"
+  # Ownership covers every managed consumer path, not just this run's drift.
+  # Staging remains restricted to changed_targets above.
+  managed_paths="$(
+    for mapping in "${mappings[@]}"; do
+      IFS='|' read -r _ _ managed_consumer_path <<< "$mapping"
+      printf '%s\n' "$managed_consumer_path"
+    done
+  )"
   if ! select_automation_branch \
     "$repo" \
     "$SYNC_BRANCH" \

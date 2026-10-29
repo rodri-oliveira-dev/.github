@@ -38,13 +38,14 @@ The CodeRabbit configuration distributor follows the same Git-based exact-head c
 The SDK synchronization uses the same exact-head principle through a temporary checkout of the target repository. It fetches the reserved branch, verifies that the fetched head is still the proven SHA, creates the SDK update commit in that target-repository checkout, and pushes it with `--force-with-lease="refs/heads/<branch>:<proven-sha>"`. The push succeeds only while the remote ref is exactly the SHA that passed provenance verification; a concurrent advance, reset to an ancestor, deletion, or replacement is rejected. An already-open automation PR is refreshed to a newer SDK without deleting or recreating its branch, while a branch that already proposes the current latest SDK is left unchanged.
 
 The policy also reads closed and merged Pull Request history. It classifies a
-remaining branch as historical-merged, historical-closed, modified after the
-recorded PR head, conflicting, or unproven. These classifications never grant
+remaining branch as historical-merged, historical-closed, historical-modified after the
+recorded PR head, conflicting, or unproven. An open PR whose branch changed
+remains `modified` and blocks automated updates. These classifications never grant
 permission to rewrite the branch.
 
 ## Recovery
 
-The SDK synchronization and consumer skill distribution recover a collision by
+The SDK synchronization, upstream skill synchronization, and consumer skill distribution recover a collision by
 leaving the reserved branch untouched and selecting the deterministic branch
 `<reserved>-<automation-id>-managed`. That recovery branch is subject to the
 same provenance and exact-SHA lease checks. A later run reuses its proven open
@@ -61,7 +62,8 @@ When a workflow reports a security block, do not force the automation through th
 1. Inspect the reserved branch and any open Pull Request manually.
 2. If the branch contains human work, preserve that work on a differently named branch before changing anything.
 3. Inspect the deterministic recovery branch and its Pull Request as well as the preferred branch.
-4. If a run failed after pushing but before creating its PR, preserve the branch and resolve it manually; the workflow will not infer ownership from its name or delete it.
-5. If a run failed because a branch changed after the SHA was captured, inspect the new remote commit. Re-run only after confirming the branch is still automation-owned; the fresh run will capture the new SHA.
+4. If a run failed after pushing but before creating its PR, preserve the branch and inspect its diff against the base. Do not create a Pull Request manually as a recovery shortcut: an unverified open PR remains `unproven_open` and blocks automated updates.
+5. If the preferred branch is orphaned and the deterministic recovery branch is absent, leave the preferred branch intact: the next run can select the recovery branch. If the recovery branch is orphaned, or both branches are historical, inspect both refs and preserve any human work on a separately named branch. When a branch must be absent for safe selection, a maintainer may close a non-owned PR and delete **only** a verified automation-only branch after inspection. The workflow never deletes branches automatically.
+6. If a run failed because a branch changed after the SHA was captured, inspect the new remote commit. Re-run only after confirming the branch is still automation-owned; the fresh run will capture the new SHA.
 
 Never rename, delete, reset, or force-update the repository default branch as part of recovery. Adding the hidden marker manually to an unrelated Pull Request is not a valid substitute for verifying the branch history and ownership.

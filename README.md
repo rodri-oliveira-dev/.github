@@ -36,6 +36,10 @@ For example, when an eligible .NET SDK update is available, an automation can op
 
 Not every feature is installed automatically. Each repository can keep its own settings and choose the integrations that make sense for it.
 
+## Keeping track of the projects
+
+The [Repo Control Center](https://github.com/rodri-oliveira-dev/repo-status-dashboard) is a complementary [public dashboard](https://rodri-oliveira-dev.github.io/repo-status-dashboard/) for following builds, security, releases, activity and technology versions across my repositories. It collects public information independently rather than controlling the automations here.
+
 ## Explore further
 
 - [**Architecture:**](docs/architecture.md) how the components fit together, with diagrams.

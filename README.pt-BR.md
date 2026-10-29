@@ -36,6 +36,10 @@ Por exemplo, quando existe uma atualização elegível do SDK .NET, uma automaç
 
 Nem todos os recursos são instalados automaticamente: cada repositório pode ter suas próprias configurações e optar pelas integrações que fazem sentido.
 
+## Acompanhando os projetos
+
+O [Repo Control Center](https://github.com/rodri-oliveira-dev/repo-status-dashboard) complementa este repositório com um [painel público](https://rodri-oliveira-dev.github.io/repo-status-dashboard/) para acompanhar builds, segurança, releases, atividade e versões das tecnologias. Ele coleta informações públicas de forma independente, sem controlar as automações daqui.
+
 ## Quer conhecer os detalhes?
 
 - [**Arquitetura:**](docs/architecture.pt-BR.md) como as partes se conectam, com diagramas.

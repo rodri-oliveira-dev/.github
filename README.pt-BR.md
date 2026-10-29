@@ -92,15 +92,18 @@ Exemplos de regras que podem ser sobrescritas localmente:
 
 Este repositório também atua como um control plane para integrações construídas sobre uma GitHub App e a GitHub REST API. Os workflows de manutenção se autenticam com tokens de instalação de curta duração e utilizam operações de API com escopo restrito para descobrir repositórios, ler metadados e conteúdos, criar ou atualizar branches e abrir Pull Requests revisáveis.
 
-As integrações atuais baseadas na API incluem:
+Exemplos de integrações baseadas na API incluem:
 
 - sincronização do `.NET SDK`, que descobre repositórios, lê `global.json`, cria branches de atualização, grava alterações elegíveis de SDK e abre Pull Requests;
 - distribuição de skills gerenciadas de agentes, que inspeciona repositórios consumidores e cria ou atualiza Pull Requests quando as skills centrais aprovadas apresentam drift;
 - inventário de repositórios `.NET`, que usa a GitHub App como fronteira de descoberta somente leitura antes da inspeção dos projetos.
+- distribuição de configuração CodeRabbit, que propõe ponteiros para templates remotos nos repositórios mapeados;
+- auditoria de runtimes do GitHub Actions, que analisa workflows públicos e pode abrir PRs draft após opt-in manual;
+- sincronização de issues com o GitHub Projects, que utiliza um token separado para issues rotuladas.
 
 O modelo de integração segue o princípio de menor privilégio: as permissões da GitHub App são restritas às necessidades de cada workflow, alterações são controladas por revisão através de Pull Requests e workflows somente leitura não modificam os repositórios inspecionados.
 
-Branches reservadas de automação usam um contrato explícito de provenance em vez de confiar no nome da branch. Uma branch existente só pode ser atualizada quando um Pull Request aberto criado por bot apresenta repositório, base, head SHA e evidências de ownership esperados; force-updates ainda usam `--force-with-lease` vinculado ao SHA capturado. Colisões históricas permanecem intactas e são recuperadas por uma branch determinística específica da automação. Consulte [ownership de branches de automação](docs/automation-branch-ownership.pt-BR.md) para o contrato completo.
+Branches reservadas de automação usam um contrato explícito de provenance em vez de confiar no nome da branch. Uma branch existente só pode ser atualizada quando um Pull Request aberto criado por bot apresenta repositório, base, head SHA e evidências de ownership esperados; force-updates ainda usam `--force-with-lease` vinculado ao SHA capturado. Nas rotinas com seletor de ownership compartilhado, colisões históricas permanecem intactas e podem ser recuperadas por uma branch determinística específica da automação. Consulte [ownership de branches de automação](docs/automation-branch-ownership.pt-BR.md) para o contrato completo.
 
 ## Implementação e testes locais das automações
 

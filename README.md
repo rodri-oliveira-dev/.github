@@ -104,7 +104,7 @@ Examples of API-backed integrations include:
 
 The integration model follows least privilege: GitHub App permissions are scoped to each workflow's needs, writes are review-gated through Pull Requests, and read-only workflows do not modify inspected repositories.
 
-Reserved automation branches use an explicit provenance contract rather than trusting a branch name. Existing branches can be refreshed only when a matching bot-authored open Pull Request has the expected repository, base, head SHA and ownership evidence; force updates additionally use an explicit SHA-bound `--force-with-lease`. Historical collisions are left untouched and recovered through a deterministic automation-specific branch. See [automation branch ownership](docs/automation-branch-ownership.md) for the full contract.
+Reserved automation branches use an explicit provenance contract rather than trusting a branch name. Existing branches can be refreshed only when a matching bot-authored open Pull Request has the expected repository, base, head SHA and ownership evidence; force updates additionally use an explicit SHA-bound `--force-with-lease`. For workflows using the shared ownership selector, historical collisions remain untouched and can be recovered through a deterministic automation-specific branch. See [automation branch ownership](docs/automation-branch-ownership.md) for the full contract.
 
 ## Automation implementation and local tests
 

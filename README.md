@@ -6,6 +6,8 @@ Maintaining software projects involves more than writing code. It also means wel
 
 This repository brings together **guidance and automation shared across my projects**. The goal is to avoid repeating the same work and keep practices consistent, while letting each repository make its own decisions.
 
+![Illustration of a shared foundation connecting documentation, security, automation and collaboration across projects](docs/assets/shared-project-foundation.svg)
+
 ## What does it do?
 
 - **Makes collaboration easier.** Provides templates for reporting bugs, suggesting improvements and submitting contributions, alongside support and security guidance.
@@ -16,6 +18,17 @@ This repository brings together **guidance and automation shared across my proje
 - **Helps track improvements.** Brings quality-related GitHub issues together in a project view.
 
 ## How does it work?
+
+```mermaid
+flowchart TB
+    Hub[".github shared foundation"] --> Guidance["Guides and templates"]
+    Hub --> Automation["Automation and checks"]
+    Hub --> Review["Review, security and agent guidance"]
+    Guidance --> Repositories["Project repositories"]
+    Automation --> Reports["Reports and pull requests"]
+    Reports --> Repositories
+    Review --> Repositories
+```
 
 Some files provide **shared community defaults** when a repository doesn't have its own version. Other tasks run through GitHub Actions: they produce reports or propose changes for review.
 

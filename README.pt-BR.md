@@ -6,6 +6,8 @@ Manter projetos de software envolve mais do que escrever código. É preciso rec
 
 Este repositório reúne **orientações e automações que podem ser compartilhadas entre meus projetos**. A ideia é evitar trabalho repetido e manter práticas consistentes, sem tirar a autonomia de cada repositório.
 
+![Ilustração de uma base compartilhada conectando documentação, segurança, automações e colaboração entre projetos](docs/assets/shared-project-foundation.svg)
+
 ## O que ele faz?
 
 - **Facilita a colaboração.** Oferece modelos para relatar problemas, sugerir melhorias e abrir contribuições, além de orientações de suporte e segurança.
@@ -16,6 +18,17 @@ Este repositório reúne **orientações e automações que podem ser compartilh
 - **Ajuda a acompanhar melhorias.** Reúne questões de qualidade já registradas no GitHub em uma visão de projeto.
 
 ## Como funciona na prática?
+
+```mermaid
+flowchart TB
+    Hub[".github: base compartilhada"] --> Guidance["Orientações e modelos"]
+    Hub --> Automation["Automações e verificações"]
+    Hub --> Review["Revisão, segurança e agentes"]
+    Guidance --> Repositories["Repositórios dos projetos"]
+    Automation --> Reports["Relatórios e Pull Requests"]
+    Reports --> Repositories
+    Review --> Repositories
+```
 
 Alguns arquivos servem como **padrões de comunidade** para os repositórios que não têm uma versão própria. Outras tarefas são executadas pelo GitHub Actions: produzem relatórios ou propõem alterações para revisão.
 

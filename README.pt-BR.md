@@ -39,33 +39,34 @@ Arquivos específicos de cada repositório sempre têm prioridade quando um proj
 | [`.github/workflows/agent-governance-validation.yml`](.github/workflows/agent-governance-validation.yml) | Validação determinística do registry central de governança, mappings do perfil, skills gerenciadas e contratos de sincronização/distribuição. |
 | [`.github/workflows/sync-agent-skills.yml`](.github/workflows/sync-agent-skills.yml) | Sincronização semanal de quatro skills .NET em allowlist a partir do `dotnet-library-template`, sempre por Pull Request revisável no registry central. |
 | [`.github/workflows/distribute-agent-skills.yml`](.github/workflows/distribute-agent-skills.yml) | Distribui skills gerenciadas aprovadas em `.github/main` para repositórios públicos consumidores que já utilizam essas skills, abrindo um Pull Request por repositório quando existe drift. |
-| [`.github/workflows/actions-runtime-audit.yml`](.github/workflows/actions-runtime-audit.yml) | Audita runtimes legados do GitHub Actions com remediação manual por PRs draft. |
-| [`.github/workflows/distribute-coderabbit-config.yml`](.github/workflows/distribute-coderabbit-config.yml) | Sincroniza ponteiros CodeRabbit revisados centralmente por PRs. |
-| [`.github/workflows/dotnet-sdk-sync-privacy-validation.yml`](.github/workflows/dotnet-sdk-sync-privacy-validation.yml) | Testa a fronteira de privacidade dos metadados públicos do sincronizador SDK. |
-| [`.github/workflows/sonar-project-sync.yml`](.github/workflows/sonar-project-sync.yml) | Sincroniza issues GitHub rotuladas Sonar Quality Issues no Project pessoal #1. |
-| [`.github/workflows/workflow-shell-quality.yml`](.github/workflows/workflow-shell-quality.yml) | Valida sintaxe Actions e scripts Bash com actionlint/ShellCheck. |
+| [`.github/workflows/actions-runtime-audit.yml`](.github/workflows/actions-runtime-audit.yml) | Auditoria somente leitura de runtimes legados do GitHub Actions, com PRs draft opcionais por opt-in manual. |
+| [`.github/workflows/distribute-coderabbit-config.yml`](.github/workflows/distribute-coderabbit-config.yml) | Distribuição revisável de ponteiros remotos dos perfis CodeRabbit para repositórios mapeados. |
+| [`.github/workflows/dotnet-sdk-sync-privacy-validation.yml`](.github/workflows/dotnet-sdk-sync-privacy-validation.yml) | Verifica que a automação de SDK não exponha metadados de repositórios não públicos. |
+| [`.github/workflows/sonar-project-sync.yml`](.github/workflows/sonar-project-sync.yml) | Sincroniza issues abertas do GitHub com label Sonar Quality Issues com o Project pessoal nº 1. |
+| [`.github/workflows/workflow-shell-quality.yml`](.github/workflows/workflow-shell-quality.yml) | Valida os YAMLs de workflows e scripts de automação com actionlint e ShellCheck. |
 | [`agent-governance/`](agent-governance/) | Registry canônico versionado para instruções, perfis e skills reutilizáveis de agentes. Esses arquivos são distribuídos explicitamente aos consumidores; não são herdados automaticamente. |
 
-## Arquitetura e operação
+## Documentação de arquitetura e operação
 
-Os **13 workflows** estão documentados por responsabilidade e execução:
+Este repositório atua como um **Control Plane** para padrões de contribuição, governança de agentes, segurança e manutenção. Os **13 workflows** estão descritos no catálogo completo, com Mermaid para os principais fluxos e runbooks para incidentes.
 
-- [Arquitetura, integrações e fronteiras de confiança](docs/architecture.pt-BR.md)
-- [Catálogo completo de workflows](docs/workflow-catalog.pt-BR.md)
-- [Fluxos de execução em Mermaid](docs/automation-flows.pt-BR.md)
-- [Operação, diagnóstico e recuperação](docs/operations.pt-BR.md)
+- [Arquitetura e fronteiras de confiança](docs/architecture.pt-BR.md): visão de contexto, componentes, permissões e adoção.
+- [Catálogo dos 13 workflows](docs/workflow-catalog.pt-BR.md): gatilhos, credenciais, resultados e limitações.
+- [Fluxos Mermaid](docs/automation-flows.pt-BR.md): SDK, inventário, skills, CodeRabbit, auditoria de Actions, secret scanning, Sonar e releases.
+- [Operação e recuperação](docs/operations.pt-BR.md): uso de dry-run, diagnóstico de falhas, ownership e recuperação de branches.
 
 ```mermaid
 flowchart LR
-  Central[".github Control Plane"] --> Defaults["Community defaults"]
-  Central --> Actions["13 GitHub Actions workflows"]
-  Central --> Policies["Agent governance and CodeRabbit profiles"]
-  Actions --> App["Scoped GitHub App"]
-  App --> Consumers["Eligible public repositories"]
-  Actions --> Reports["PRs, CI checks, summaries and artifacts"]
+  Control["Control Plane .github"] --> Defaults["Arquivos de comunidade"]
+  Control --> Actions["13 workflows GitHub Actions"]
+  Control --> Policies["Governança de agentes e CodeRabbit"]
+  Actions --> App["GitHub App ou token delimitado"]
+  App --> Consumers["Repositórios consumidores elegíveis"]
+  Actions --> Reports["PRs, checks e relatórios"]
+  Policies --> Actions
 ```
 
-Nem todos os workflows fazem mutações, nem todas as configurações são herdadas automaticamente.
+**Nota:** somente arquivos de comunidade suportados podem ser herdados automaticamente pelo GitHub. Os workflows, as skills e as configurações CodeRabbit dependem de adoção explícita.
 
 ## Como o GitHub utiliza este repositório
 
@@ -111,7 +112,7 @@ O workflow [Workflow and shell quality](.github/workflows/workflow-shell-quality
 
 ## Workflows reutilizáveis versionados
 
-Os workflows reutilizáveis seguem um contrato de release revisada: tags `vMAJOR.MINOR.PATCH` imutáveis, um alias `vMAJOR` deliberadamente móvel para atualizações compatíveis e SHA completo de commit para reprodutibilidade estrita. A versão revisada fica em [`.github/reusable-workflows/VERSION`](.github/reusable-workflows/VERSION); alterá-la exige Pull Request, mas a publicação é uma etapa manual explícita pelo [workflow de release](.github/workflows/reusable-workflow-release.yml) com permissões limitadas na `main`. O valor inicial é `v1.0.0`; consumidores só devem adotar `@v1` depois que a release e o alias estiverem visíveis. A [política de versionamento, publicação, atualização e reversão](docs/reusable-workflow-versioning.pt-BR.md) documenta o fluxo de promoção e recuperação. O caller obrigatório de secret scanning do próprio control plane continua fixado por SHA.
+Os workflows reutilizáveis seguem um contrato de release revisada: tags `vMAJOR.MINOR.PATCH` imutáveis, um alias `vMAJOR` deliberadamente móvel para atualizações compatíveis e SHA completo de commit para reprodutibilidade estrita. A versão revisada fica em [`.github/reusable-workflows/VERSION`](.github/reusable-workflows/VERSION); alterá-la exige Pull Request, mas a publicação é uma etapa manual explícita pelo [workflow de release](.github/workflows/reusable-workflow-release.yml) com permissões limitadas na `main`. O valor inicial foi `v1.0.0`; a versão atualmente declarada é `v1.1.0`; consumidores só devem adotar `@v1` depois que a release e o alias estiverem visíveis. A [política de versionamento, publicação, atualização e reversão](docs/reusable-workflow-versioning.pt-BR.md) documenta o fluxo de promoção e recuperação. O caller obrigatório de secret scanning do próprio control plane continua fixado por SHA.
 
 ## Manutenção das dependências de GitHub Actions
 
@@ -295,6 +296,8 @@ Consulte [`docs/agent-governance.pt-BR.md`](docs/agent-governance.pt-BR.md) para
 │   ├── ISSUE_TEMPLATE/
 │   ├── actions/
 │   ├── scripts/
+│   │   ├── automation/
+│   │   └── actions-runtime-audit/
 │   ├── reusable-workflows/VERSION
 │   ├── dependabot.yml
 │   └── workflows/
@@ -311,12 +314,27 @@ Consulte [`docs/agent-governance.pt-BR.md`](docs/agent-governance.pt-BR.md) para
 │       ├── sonar-project-sync.yml
 │       ├── sync-agent-skills.yml
 │       └── workflow-shell-quality.yml
-├── agent-governance/ (manifest, profile, nine skills)
-├── coderabbit-templates/ (profiles and repository mapping)
-├── docs/ (architecture, catalog, Mermaid flows, runbooks)
+├── agent-governance/
+│   ├── VERSION and manifest.json
+│   ├── base/
+│   ├── profiles/
+│   └── skills/
+├── coderabbit-templates/
+│   ├── repositories.json
+│   ├── remote-config.yaml
+│   └── five profile YAML files
+├── docs/
+│   ├── architecture*.md
+│   ├── workflow-catalog*.md
+│   ├── automation-flows*.md
+│   ├── operations*.md
+│   └── topic-specific policies and runbooks
+├── CODE_OF_CONDUCT.md
+├── CONTRIBUTING.md
+├── SECURITY.md
+├── SUPPORT.md
 ├── README.md
-├── README.pt-BR.md
-└── community-health and local configuration files
+└── README.pt-BR.md
 ```
 
 ## Princípios de governança

@@ -119,7 +119,7 @@ A scheduled audit is read-only. Only a manually opted-in `apply_fixes=true` run 
 flowchart TD
   Event["PR, push, schedule or workflow_call"] --> Scope["Select trustworthy commit range; else full history"]
   Scope --> Policy["Use base-branch scanner policy for PR policy edits"]
-  Policy --> Size{"Every selected Git blob <= 20 MiB?"}
+  Policy --> Size{"Every selected Git blob at most 20 MiB?"}
   Size -->|No| Coverage["coverage-failure"]
   Size -->|Yes| Install["Download and SHA256-verify pinned Infisical CLI"]
   Install --> Scan["Run redacted Git-history scan"]

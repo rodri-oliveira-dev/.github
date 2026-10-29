@@ -29,7 +29,7 @@ Os gatilhos agendados de distribuição CodeRabbit usam cron diário com gate in
 
 | Sintoma | Significado | Ação segura |
 | --- | --- | --- |
-| `ownership is unproven` | Branch reservada não tem PR aberto compatível ou evidência suficiente | Preserve branch; inspect prior PR and history before retry |
+| `ownership is unproven` | Branch reservada não tem PR aberto compatível ou evidência suficiente | Preservar a branch; verificar PR anterior e histórico antes de repetir |
 | `modified`, `unproven_open` | SHA, autor, base ou arquivos inesperados; possível trabalho humano | Não excluir nem forçar push; conferir proveniência |
 | `coverage-failure` | Blob selecionado ultrapassa 20 MiB; inspeção incompleta | Remediar arquivo/histórico, nunca mascarar via ignore |
 | `tool-failure` | Secret scanner não concluiu com confiança | Revisar CLI, hash, download e logs; não considerar `clean` |

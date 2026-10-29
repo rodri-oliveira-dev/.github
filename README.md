@@ -93,11 +93,14 @@ Examples of repository-specific overrides include:
 
 This repository also acts as a control plane for integrations built on a GitHub App and the GitHub REST API. Maintenance workflows authenticate with short-lived installation tokens and use scoped API operations to discover repositories, read repository metadata and contents, create or update branches, and open reviewable Pull Requests.
 
-Current API-backed integrations include:
+Examples of API-backed integrations include:
 
 - `.NET SDK synchronization`, which discovers repositories, reads `global.json`, creates update branches, writes eligible SDK changes, and opens Pull Requests;
 - managed agent-skill distribution, which inspects consumer repositories and creates or refreshes Pull Requests when approved central skills drift;
 - `.NET repository inventory`, which uses the GitHub App as a read-only discovery boundary before repository inspection.
+- the CodeRabbit configuration distributor, which proposes remote-config pointers in mapped repositories;
+- the Actions-runtime audit, which scans public workflows and can open draft remediation PRs after manual opt-in;
+- GitHub Project synchronization, which uses a separate scoped token for labeled GitHub issues.
 
 The integration model follows least privilege: GitHub App permissions are scoped to each workflow's needs, writes are review-gated through Pull Requests, and read-only workflows do not modify inspected repositories.
 

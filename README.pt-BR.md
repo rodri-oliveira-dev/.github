@@ -39,7 +39,34 @@ Arquivos específicos de cada repositório sempre têm prioridade quando um proj
 | [`.github/workflows/agent-governance-validation.yml`](.github/workflows/agent-governance-validation.yml) | Validação determinística do registry central de governança, mappings do perfil, skills gerenciadas e contratos de sincronização/distribuição. |
 | [`.github/workflows/sync-agent-skills.yml`](.github/workflows/sync-agent-skills.yml) | Sincronização semanal de quatro skills .NET em allowlist a partir do `dotnet-library-template`, sempre por Pull Request revisável no registry central. |
 | [`.github/workflows/distribute-agent-skills.yml`](.github/workflows/distribute-agent-skills.yml) | Distribui skills gerenciadas aprovadas em `.github/main` para repositórios públicos consumidores que já utilizam essas skills, abrindo um Pull Request por repositório quando existe drift. |
+| [`.github/workflows/actions-runtime-audit.yml`](.github/workflows/actions-runtime-audit.yml) | Auditoria somente leitura de runtimes legados do GitHub Actions, com PRs draft opcionais por opt-in manual. |
+| [`.github/workflows/distribute-coderabbit-config.yml`](.github/workflows/distribute-coderabbit-config.yml) | Distribuição revisável de ponteiros remotos dos perfis CodeRabbit para repositórios mapeados. |
+| [`.github/workflows/dotnet-sdk-sync-privacy-validation.yml`](.github/workflows/dotnet-sdk-sync-privacy-validation.yml) | Verifica que a automação de SDK não exponha metadados de repositórios não públicos. |
+| [`.github/workflows/sonar-project-sync.yml`](.github/workflows/sonar-project-sync.yml) | Sincroniza issues abertas do GitHub com label Sonar Quality Issues com o Project pessoal nº 1. |
+| [`.github/workflows/workflow-shell-quality.yml`](.github/workflows/workflow-shell-quality.yml) | Valida os YAMLs de workflows e scripts de automação com actionlint e ShellCheck. |
 | [`agent-governance/`](agent-governance/) | Registry canônico versionado para instruções, perfis e skills reutilizáveis de agentes. Esses arquivos são distribuídos explicitamente aos consumidores; não são herdados automaticamente. |
+
+## Documentação de arquitetura e operação
+
+Este repositório atua como um **Control Plane** para padrões de contribuição, governança de agentes, segurança e manutenção. Os **13 workflows** estão descritos no catálogo completo, com Mermaid para os principais fluxos e runbooks para incidentes.
+
+- [Arquitetura e fronteiras de confiança](docs/architecture.pt-BR.md): visão de contexto, componentes, permissões e adoção.
+- [Catálogo dos 13 workflows](docs/workflow-catalog.pt-BR.md): gatilhos, credenciais, resultados e limitações.
+- [Fluxos Mermaid](docs/automation-flows.pt-BR.md): SDK, inventário, skills, CodeRabbit, auditoria de Actions, secret scanning, Sonar e releases.
+- [Operação e recuperação](docs/operations.pt-BR.md): uso de dry-run, diagnóstico de falhas, ownership e recuperação de branches.
+
+```mermaid
+flowchart LR
+  Control["Control Plane .github"] --> Defaults["Arquivos de comunidade"]
+  Control --> Actions["13 workflows GitHub Actions"]
+  Control --> Policies["Governança de agentes e CodeRabbit"]
+  Actions --> App["GitHub App ou token delimitado"]
+  App --> Consumers["Repositórios consumidores elegíveis"]
+  Actions --> Reports["PRs, checks e relatórios"]
+  Policies --> Actions
+```
+
+**Nota:** somente arquivos de comunidade suportados podem ser herdados automaticamente pelo GitHub. Os workflows, as skills e as configurações CodeRabbit dependem de adoção explícita.
 
 ## Como o GitHub utiliza este repositório
 
@@ -65,15 +92,18 @@ Exemplos de regras que podem ser sobrescritas localmente:
 
 Este repositório também atua como um control plane para integrações construídas sobre uma GitHub App e a GitHub REST API. Os workflows de manutenção se autenticam com tokens de instalação de curta duração e utilizam operações de API com escopo restrito para descobrir repositórios, ler metadados e conteúdos, criar ou atualizar branches e abrir Pull Requests revisáveis.
 
-As integrações atuais baseadas na API incluem:
+Exemplos de integrações baseadas na API incluem:
 
 - sincronização do `.NET SDK`, que descobre repositórios, lê `global.json`, cria branches de atualização, grava alterações elegíveis de SDK e abre Pull Requests;
 - distribuição de skills gerenciadas de agentes, que inspeciona repositórios consumidores e cria ou atualiza Pull Requests quando as skills centrais aprovadas apresentam drift;
 - inventário de repositórios `.NET`, que usa a GitHub App como fronteira de descoberta somente leitura antes da inspeção dos projetos.
+- distribuição de configuração CodeRabbit, que propõe ponteiros para templates remotos nos repositórios mapeados;
+- auditoria de runtimes do GitHub Actions, que analisa workflows públicos e pode abrir PRs draft após opt-in manual;
+- sincronização de issues com o GitHub Projects, que utiliza um token separado para issues rotuladas.
 
 O modelo de integração segue o princípio de menor privilégio: as permissões da GitHub App são restritas às necessidades de cada workflow, alterações são controladas por revisão através de Pull Requests e workflows somente leitura não modificam os repositórios inspecionados.
 
-Branches reservadas de automação usam um contrato explícito de provenance em vez de confiar no nome da branch. Uma branch existente só pode ser atualizada quando um Pull Request aberto criado por bot apresenta repositório, base, head SHA e evidências de ownership esperados; force-updates ainda usam `--force-with-lease` vinculado ao SHA capturado. Colisões históricas permanecem intactas e são recuperadas por uma branch determinística específica da automação. Consulte [ownership de branches de automação](docs/automation-branch-ownership.pt-BR.md) para o contrato completo.
+Branches reservadas de automação usam um contrato explícito de provenance em vez de confiar no nome da branch. Uma branch existente só pode ser atualizada quando um Pull Request aberto criado por bot apresenta repositório, base, head SHA e evidências de ownership esperados; force-updates ainda usam `--force-with-lease` vinculado ao SHA capturado. Nas rotinas com seletor de ownership compartilhado, colisões históricas permanecem intactas e podem ser recuperadas por uma branch determinística específica da automação. Consulte [ownership de branches de automação](docs/automation-branch-ownership.pt-BR.md) para o contrato completo.
 
 ## Implementação e testes locais das automações
 
@@ -85,7 +115,7 @@ O workflow [Workflow and shell quality](.github/workflows/workflow-shell-quality
 
 ## Workflows reutilizáveis versionados
 
-Os workflows reutilizáveis seguem um contrato de release revisada: tags `vMAJOR.MINOR.PATCH` imutáveis, um alias `vMAJOR` deliberadamente móvel para atualizações compatíveis e SHA completo de commit para reprodutibilidade estrita. A versão revisada fica em [`.github/reusable-workflows/VERSION`](.github/reusable-workflows/VERSION); alterá-la exige Pull Request, mas a publicação é uma etapa manual explícita pelo [workflow de release](.github/workflows/reusable-workflow-release.yml) com permissões limitadas na `main`. O valor inicial é `v1.0.0`; consumidores só devem adotar `@v1` depois que a release e o alias estiverem visíveis. A [política de versionamento, publicação, atualização e reversão](docs/reusable-workflow-versioning.pt-BR.md) documenta o fluxo de promoção e recuperação. O caller obrigatório de secret scanning do próprio control plane continua fixado por SHA.
+Os workflows reutilizáveis seguem um contrato de release revisada: tags `vMAJOR.MINOR.PATCH` imutáveis, um alias `vMAJOR` deliberadamente móvel para atualizações compatíveis e SHA completo de commit para reprodutibilidade estrita. A versão revisada fica em [`.github/reusable-workflows/VERSION`](.github/reusable-workflows/VERSION); alterá-la exige Pull Request, mas a publicação é uma etapa manual explícita pelo [workflow de release](.github/workflows/reusable-workflow-release.yml) com permissões limitadas na `main`. O valor inicial foi `v1.0.0`; a versão atualmente declarada é `v1.1.0`; consumidores só devem adotar `@v1` depois que a release e o alias estiverem visíveis. A [política de versionamento, publicação, atualização e reversão](docs/reusable-workflow-versioning.pt-BR.md) documenta o fluxo de promoção e recuperação. O caller obrigatório de secret scanning do próprio control plane continua fixado por SHA.
 
 ## Manutenção das dependências de GitHub Actions
 
@@ -265,39 +295,43 @@ Consulte [`docs/agent-governance.pt-BR.md`](docs/agent-governance.pt-BR.md) para
 
 ```text
 .
-├── .gitattributes
 ├── .github/
 │   ├── ISSUE_TEMPLATE/
-│   │   ├── bug_report.yml
-│   │   ├── config.yml
-│   │   └── feature_request.yml
-│   ├── FUNDING.yml
-│   ├── PULL_REQUEST_TEMPLATE.md
+│   ├── actions/
+│   ├── scripts/
+│   │   ├── automation/
+│   │   └── actions-runtime-audit/
+│   ├── reusable-workflows/VERSION
 │   ├── dependabot.yml
-│   ├── reusable-workflows/
-│   │   └── VERSION
 │   └── workflows/
+│       ├── actions-runtime-audit.yml
 │       ├── agent-governance-validation.yml
+│       ├── control-plane-secret-scan.yml
 │       ├── distribute-agent-skills.yml
+│       ├── distribute-coderabbit-config.yml
 │       ├── dotnet-repository-inventory.yml
+│       ├── dotnet-sdk-sync-privacy-validation.yml
 │       ├── dotnet-sdk-sync.yml
 │       ├── reusable-secret-scan.yml
 │       ├── reusable-workflow-release.yml
-│       └── sync-agent-skills.yml
-├── .github.code-workspace
-├── .gitignore
+│       ├── sonar-project-sync.yml
+│       ├── sync-agent-skills.yml
+│       └── workflow-shell-quality.yml
 ├── agent-governance/
-│   ├── VERSION
+│   ├── VERSION and manifest.json
 │   ├── base/
 │   ├── profiles/
 │   └── skills/
+├── coderabbit-templates/
+│   ├── repositories.json
+│   ├── remote-config.yaml
+│   └── five profile YAML files
 ├── docs/
-│   ├── agent-governance.md
-│   ├── agent-governance.pt-BR.md
-│   ├── reusable-workflow-versioning.md
-│   ├── reusable-workflow-versioning.pt-BR.md
-│   ├── secret-scanning.md
-│   └── secret-scanning.pt-BR.md
+│   ├── architecture*.md
+│   ├── workflow-catalog*.md
+│   ├── automation-flows*.md
+│   ├── operations*.md
+│   └── topic-specific policies and runbooks
 ├── CODE_OF_CONDUCT.md
 ├── CONTRIBUTING.md
 ├── SECURITY.md

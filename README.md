@@ -40,7 +40,34 @@ Repository-specific files always take precedence when a project needs different 
 | [`.github/workflows/agent-governance-validation.yml`](.github/workflows/agent-governance-validation.yml) | Deterministic validation for the central agent-governance registry, profile mappings, managed skills, and synchronization/distribution contracts. |
 | [`.github/workflows/sync-agent-skills.yml`](.github/workflows/sync-agent-skills.yml) | Weekly upstream synchronization of four allowlisted .NET skills from `dotnet-library-template` into the central registry through a reviewed Pull Request. |
 | [`.github/workflows/distribute-agent-skills.yml`](.github/workflows/distribute-agent-skills.yml) | Distributes approved managed skills from `.github/main` to public consumer repositories that already use them, opening one reviewed Pull Request per repository when drift exists. |
+| [`.github/workflows/actions-runtime-audit.yml`](.github/workflows/actions-runtime-audit.yml) | Read-only audit of legacy GitHub Actions runtimes, with manually opted-in draft remediation PRs. |
+| [`.github/workflows/distribute-coderabbit-config.yml`](.github/workflows/distribute-coderabbit-config.yml) | Review-gated distribution of remote CodeRabbit profile pointers to mapped repositories. |
+| [`.github/workflows/dotnet-sdk-sync-privacy-validation.yml`](.github/workflows/dotnet-sdk-sync-privacy-validation.yml) | Checks that SDK automation does not expose non-public repository metadata. |
+| [`.github/workflows/sonar-project-sync.yml`](.github/workflows/sonar-project-sync.yml) | Synchronizes open GitHub issues labeled Sonar Quality Issues with personal Project #1. |
+| [`.github/workflows/workflow-shell-quality.yml`](.github/workflows/workflow-shell-quality.yml) | Validates all workflow YAML files and automation shell scripts with actionlint and ShellCheck. |
 | [`agent-governance/`](agent-governance/) | Versioned canonical registry for reusable agent instructions, profiles, and skills. These files are distributed explicitly to consumer repositories; they are not inherited automatically. |
+
+## Architecture and operations documentation
+
+This repository acts as a **control plane** for contribution defaults, agent governance, security and maintenance. All **13 workflows** are covered by a complete catalog, Mermaid decision diagrams and operational runbooks.
+
+- [Architecture and trust boundaries](docs/architecture.md): context, components, permissions and adoption.
+- [Catalog of all 13 workflows](docs/workflow-catalog.md): triggers, credentials, outputs and limitations.
+- [Mermaid execution flows](docs/automation-flows.md): SDK, inventory, skills, CodeRabbit, Actions audit, secret scanning, Sonar and releases.
+- [Operations and recovery](docs/operations.md): dry-runs, incident diagnosis, branch ownership and safe recovery.
+
+```mermaid
+flowchart LR
+  Control[".github control plane"] --> Defaults["Community-health defaults"]
+  Control --> Actions["13 GitHub Actions workflows"]
+  Control --> Policies["Agent and CodeRabbit policies"]
+  Actions --> App["GitHub App or scoped token"]
+  App --> Consumers["Eligible consumer repositories"]
+  Actions --> Reports["PRs, CI checks and reports"]
+  Policies --> Actions
+```
+
+**Note:** only supported community-health files can be implicitly inherited by GitHub. Workflows, skills and CodeRabbit configuration require explicit adoption.
 
 ## How GitHub uses this repository
 
@@ -66,15 +93,18 @@ Examples of repository-specific overrides include:
 
 This repository also acts as a control plane for integrations built on a GitHub App and the GitHub REST API. Maintenance workflows authenticate with short-lived installation tokens and use scoped API operations to discover repositories, read repository metadata and contents, create or update branches, and open reviewable Pull Requests.
 
-Current API-backed integrations include:
+Examples of API-backed integrations include:
 
 - `.NET SDK synchronization`, which discovers repositories, reads `global.json`, creates update branches, writes eligible SDK changes, and opens Pull Requests;
 - managed agent-skill distribution, which inspects consumer repositories and creates or refreshes Pull Requests when approved central skills drift;
 - `.NET repository inventory`, which uses the GitHub App as a read-only discovery boundary before repository inspection.
+- the CodeRabbit configuration distributor, which proposes remote-config pointers in mapped repositories;
+- the Actions-runtime audit, which scans public workflows and can open draft remediation PRs after manual opt-in;
+- GitHub Project synchronization, which uses a separate scoped token for labeled GitHub issues.
 
 The integration model follows least privilege: GitHub App permissions are scoped to each workflow's needs, writes are review-gated through Pull Requests, and read-only workflows do not modify inspected repositories.
 
-Reserved automation branches use an explicit provenance contract rather than trusting a branch name. Existing branches can be refreshed only when a matching bot-authored open Pull Request has the expected repository, base, head SHA and ownership evidence; force updates additionally use an explicit SHA-bound `--force-with-lease`. Historical collisions are left untouched and recovered through a deterministic automation-specific branch. See [automation branch ownership](docs/automation-branch-ownership.md) for the full contract.
+Reserved automation branches use an explicit provenance contract rather than trusting a branch name. Existing branches can be refreshed only when a matching bot-authored open Pull Request has the expected repository, base, head SHA and ownership evidence; force updates additionally use an explicit SHA-bound `--force-with-lease`. For workflows using the shared ownership selector, historical collisions remain untouched and can be recovered through a deterministic automation-specific branch. See [automation branch ownership](docs/automation-branch-ownership.md) for the full contract.
 
 ## Automation implementation and local tests
 
@@ -86,7 +116,7 @@ The [Workflow and shell quality](.github/workflows/workflow-shell-quality.yml) w
 
 ## Versioned reusable workflows
 
-Reusable workflows follow a reviewed release contract: immutable `vMAJOR.MINOR.PATCH` tags, a deliberately moving backward-compatible `vMAJOR` alias for consumers, and full commit SHA for strict reproducibility. The reviewed version is declared in [`.github/reusable-workflows/VERSION`](.github/reusable-workflows/VERSION); changing it requires a Pull Request, but publication is an explicit manual step through the permission-scoped [release workflow](.github/workflows/reusable-workflow-release.yml) on `main`. The initial value is `v1.0.0`; consumers should adopt `@v1` only after the release and alias are visible. [Versioning, release, update and rollback policy](docs/reusable-workflow-versioning.md) documents the promotion and recovery flow. The control plane's own required scanner caller remains SHA-pinned.
+Reusable workflows follow a reviewed release contract: immutable `vMAJOR.MINOR.PATCH` tags, a deliberately moving backward-compatible `vMAJOR` alias for consumers, and full commit SHA for strict reproducibility. The reviewed version is declared in [`.github/reusable-workflows/VERSION`](.github/reusable-workflows/VERSION); changing it requires a Pull Request, but publication is an explicit manual step through the permission-scoped [release workflow](.github/workflows/reusable-workflow-release.yml) on `main`. The initial value was `v1.0.0`; the currently declared version is `v1.1.0`; consumers should adopt `@v1` only after the release and alias are visible. [Versioning, release, update and rollback policy](docs/reusable-workflow-versioning.md) documents the promotion and recovery flow. The control plane's own required scanner caller remains SHA-pinned.
 
 ## GitHub Actions dependency maintenance
 
@@ -266,39 +296,43 @@ See [`docs/agent-governance.md`](docs/agent-governance.md) for the composition m
 
 ```text
 .
-├── .gitattributes
 ├── .github/
 │   ├── ISSUE_TEMPLATE/
-│   │   ├── bug_report.yml
-│   │   ├── config.yml
-│   │   └── feature_request.yml
-│   ├── FUNDING.yml
-│   ├── PULL_REQUEST_TEMPLATE.md
+│   ├── actions/
+│   ├── scripts/
+│   │   ├── automation/
+│   │   └── actions-runtime-audit/
+│   ├── reusable-workflows/VERSION
 │   ├── dependabot.yml
-│   ├── reusable-workflows/
-│   │   └── VERSION
 │   └── workflows/
+│       ├── actions-runtime-audit.yml
 │       ├── agent-governance-validation.yml
+│       ├── control-plane-secret-scan.yml
 │       ├── distribute-agent-skills.yml
+│       ├── distribute-coderabbit-config.yml
 │       ├── dotnet-repository-inventory.yml
+│       ├── dotnet-sdk-sync-privacy-validation.yml
 │       ├── dotnet-sdk-sync.yml
 │       ├── reusable-secret-scan.yml
 │       ├── reusable-workflow-release.yml
-│       └── sync-agent-skills.yml
-├── .github.code-workspace
-├── .gitignore
+│       ├── sonar-project-sync.yml
+│       ├── sync-agent-skills.yml
+│       └── workflow-shell-quality.yml
 ├── agent-governance/
-│   ├── VERSION
+│   ├── VERSION and manifest.json
 │   ├── base/
 │   ├── profiles/
 │   └── skills/
+├── coderabbit-templates/
+│   ├── repositories.json
+│   ├── remote-config.yaml
+│   └── five profile YAML files
 ├── docs/
-│   ├── agent-governance.md
-│   ├── agent-governance.pt-BR.md
-│   ├── reusable-workflow-versioning.md
-│   ├── reusable-workflow-versioning.pt-BR.md
-│   ├── secret-scanning.md
-│   └── secret-scanning.pt-BR.md
+│   ├── architecture*.md
+│   ├── workflow-catalog*.md
+│   ├── automation-flows*.md
+│   ├── operations*.md
+│   └── topic-specific policies and runbooks
 ├── CODE_OF_CONDUCT.md
 ├── CONTRIBUTING.md
 ├── SECURITY.md

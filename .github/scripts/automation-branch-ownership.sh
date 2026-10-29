@@ -159,7 +159,11 @@ verify_automation_branch_ownership() {
     return 0
   fi
   if [[ "$pr_head_sha" != "$remote_sha" ]]; then
-    AUTOMATION_BRANCH_STATE="modified"
+    if [[ "$state" == "open" ]]; then
+      AUTOMATION_BRANCH_STATE="modified"
+    else
+      AUTOMATION_BRANCH_STATE="historical_modified"
+    fi
     AUTOMATION_OWNERSHIP_ERROR="branch $repo:$branch_name changed after Pull Request #$pr_number recorded its head SHA"
     return 0
   fi
@@ -252,10 +256,10 @@ select_automation_branch() {
     recovery_owned="true"
   fi
   case "$primary_state" in
-    absent|historical_merged|historical_closed|historical_conflict|unproven) primary_recoverable="true" ;;
+    absent|historical_merged|historical_closed|historical_modified|historical_conflict|unproven) primary_recoverable="true" ;;
   esac
   case "$recovery_state" in
-    absent|historical_merged|historical_closed|historical_conflict|unproven) recovery_recoverable="true" ;;
+    absent|historical_merged|historical_closed|historical_modified|historical_conflict|unproven) recovery_recoverable="true" ;;
   esac
   if [[ "$primary_owned" == "true" && "$recovery_owned" == "true" ]]; then
     AUTOMATION_BRANCH_STATE="conflict"

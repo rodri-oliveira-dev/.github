@@ -40,7 +40,33 @@ Repository-specific files always take precedence when a project needs different 
 | [`.github/workflows/agent-governance-validation.yml`](.github/workflows/agent-governance-validation.yml) | Deterministic validation for the central agent-governance registry, profile mappings, managed skills, and synchronization/distribution contracts. |
 | [`.github/workflows/sync-agent-skills.yml`](.github/workflows/sync-agent-skills.yml) | Weekly upstream synchronization of four allowlisted .NET skills from `dotnet-library-template` into the central registry through a reviewed Pull Request. |
 | [`.github/workflows/distribute-agent-skills.yml`](.github/workflows/distribute-agent-skills.yml) | Distributes approved managed skills from `.github/main` to public consumer repositories that already use them, opening one reviewed Pull Request per repository when drift exists. |
+| [`.github/workflows/actions-runtime-audit.yml`](.github/workflows/actions-runtime-audit.yml) | Audits legacy GitHub Actions runtimes and offers manual draft remediation PRs. |
+| [`.github/workflows/distribute-coderabbit-config.yml`](.github/workflows/distribute-coderabbit-config.yml) | Synchronizes centrally reviewed CodeRabbit remote-config pointers through PRs. |
+| [`.github/workflows/dotnet-sdk-sync-privacy-validation.yml`](.github/workflows/dotnet-sdk-sync-privacy-validation.yml) | Tests the SDK synchronizer public-only metadata/privacy boundary. |
+| [`.github/workflows/sonar-project-sync.yml`](.github/workflows/sonar-project-sync.yml) | Synchronizes Sonar Quality Issues-labeled GitHub issues into personal Project #1. |
+| [`.github/workflows/workflow-shell-quality.yml`](.github/workflows/workflow-shell-quality.yml) | Validates Actions workflow syntax and Bash scripts with actionlint/ShellCheck. |
 | [`agent-governance/`](agent-governance/) | Versioned canonical registry for reusable agent instructions, profiles, and skills. These files are distributed explicitly to consumer repositories; they are not inherited automatically. |
+
+## Architecture and operations
+
+The **13 workflows** are documented by responsibility and runtime behavior:
+
+- [Architecture, integrations and trust boundaries](docs/architecture.md)
+- [Complete workflow catalog](docs/workflow-catalog.md)
+- [Mermaid execution flows](docs/automation-flows.md)
+- [Operations, diagnostics and recovery](docs/operations.md)
+
+```mermaid
+flowchart LR
+  Central[".github Control Plane"] --> Defaults["Community defaults"]
+  Central --> Actions["13 GitHub Actions workflows"]
+  Central --> Policies["Agent governance and CodeRabbit profiles"]
+  Actions --> App["Scoped GitHub App"]
+  App --> Consumers["Eligible public repositories"]
+  Actions --> Reports["PRs, CI checks, summaries and artifacts"]
+```
+
+Not every workflow mutates repositories or is inherited automatically.
 
 ## How GitHub uses this repository
 
@@ -266,45 +292,32 @@ See [`docs/agent-governance.md`](docs/agent-governance.md) for the composition m
 
 ```text
 .
-├── .gitattributes
 ├── .github/
 │   ├── ISSUE_TEMPLATE/
-│   │   ├── bug_report.yml
-│   │   ├── config.yml
-│   │   └── feature_request.yml
-│   ├── FUNDING.yml
-│   ├── PULL_REQUEST_TEMPLATE.md
+│   ├── actions/
+│   ├── scripts/
+│   ├── reusable-workflows/VERSION
 │   ├── dependabot.yml
-│   ├── reusable-workflows/
-│   │   └── VERSION
 │   └── workflows/
+│       ├── actions-runtime-audit.yml
 │       ├── agent-governance-validation.yml
+│       ├── control-plane-secret-scan.yml
 │       ├── distribute-agent-skills.yml
+│       ├── distribute-coderabbit-config.yml
 │       ├── dotnet-repository-inventory.yml
+│       ├── dotnet-sdk-sync-privacy-validation.yml
 │       ├── dotnet-sdk-sync.yml
 │       ├── reusable-secret-scan.yml
 │       ├── reusable-workflow-release.yml
-│       └── sync-agent-skills.yml
-├── .github.code-workspace
-├── .gitignore
-├── agent-governance/
-│   ├── VERSION
-│   ├── base/
-│   ├── profiles/
-│   └── skills/
-├── docs/
-│   ├── agent-governance.md
-│   ├── agent-governance.pt-BR.md
-│   ├── reusable-workflow-versioning.md
-│   ├── reusable-workflow-versioning.pt-BR.md
-│   ├── secret-scanning.md
-│   └── secret-scanning.pt-BR.md
-├── CODE_OF_CONDUCT.md
-├── CONTRIBUTING.md
-├── SECURITY.md
-├── SUPPORT.md
+│       ├── sonar-project-sync.yml
+│       ├── sync-agent-skills.yml
+│       └── workflow-shell-quality.yml
+├── agent-governance/ (manifest, profile, nine skills)
+├── coderabbit-templates/ (profiles and repository mapping)
+├── docs/ (architecture, catalog, Mermaid flows, runbooks)
 ├── README.md
-└── README.pt-BR.md
+├── README.pt-BR.md
+└── community-health and local configuration files
 ```
 
 ## Design principles

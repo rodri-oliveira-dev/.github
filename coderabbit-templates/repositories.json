@@ -32,6 +32,9 @@
       "rodri-oliveira-dev/rodri-oliveira-dev",
       "rodri-oliveira-dev/rodri-oliveira-dev.github.io",
       "rodri-oliveira-dev/dotnet-copilot-code-review-skills"
+    ],
+    "dotnet-educacional.yaml": [
+      "rodri-oliveira-dev/engenharia-dotnet"
     ]
   },
   "ignored": {

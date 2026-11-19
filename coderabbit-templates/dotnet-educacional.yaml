@@ -1,0 +1,117 @@
+# Perfil de revisao para o repositorio educacional engenharia-dotnet.
+# Configuracao central consumida via remote_config na raiz do repositorio.
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+
+language: "pt-BR"
+tone_instructions: >-
+  Seja tecnico, preciso e construtivo. Priorize defeitos demonstraveis, erros
+  factuais, seguranca e inconsistencias didaticas. Evite comentarios cosmeticos.
+
+reviews:
+  profile: "chill"
+  request_changes_workflow: false
+  high_level_summary: true
+  review_status: true
+  review_details: true
+  poem: false
+
+  auto_review:
+    enabled: true
+    drafts: false
+
+  path_filters:
+    - "!**/bin/**"
+    - "!**/obj/**"
+    - "!**/TestResults/**"
+    - "!**/coverage/**"
+    - "!**/coverage-report/**"
+
+  path_instructions:
+    - path: "**/*.md"
+      instructions: |
+        Revise em portugues do Brasil, com foco em precisao tecnica e clareza.
+        - Siga docs/guia-de-estilo.md e as regras editoriais locais.
+        - Confirme links relativos, ancoras, comandos, trechos de codigo e fontes.
+        - Distinga contratos documentados, detalhes de implementacao e hipoteses.
+        - Exija evidencias para afirmacoes fortes de desempenho, seguranca ou versoes.
+        - Prefira referencias oficiais e fontes primarias; nao invente citacoes.
+        - Evite sugestoes puramente estilisticas ou preferencias subjetivas.
+
+    - path: "docs/**/*.md"
+      instructions: |
+        Revise como material de estudo e consulta tecnica, nao como FAQ de entrevista.
+        - Preserve o capitulo canonico para cada tema e evite duplicacao extensa.
+        - Verifique consistencia com .NET 11, C# 15 e as versoes declaradas.
+        - Confirme escopo, nivel, objetivo, pre-requisitos, ultima revisao e exemplos
+          quando exigidos pelo template e pelo guia editorial.
+        - Verifique contexto, alternativas, limitacoes, trade-offs e modos de falha.
+        - Nao exija complexidade de producao sem necessidade didatica.
+        - Capitulo planejado nao deve receber link de arquivo ainda inexistente.
+
+    - path: "docs/planejamento/**/*.md"
+      instructions: |
+        Verifique consistencia do mapa, inventario e diretrizes editoriais.
+        - IDs de capitulos devem permanecer estaveis e sem duplicidade.
+        - Novos capitulos e reorganizacoes devem refletir os indices relevantes.
+        - Pre-requisitos publicados devem existir; futuros permanecem como texto.
+        - Planejamento editorial nao constitui fonte primaria para fatos tecnicos.
+
+    - path: "exemplos/**/*.cs"
+      instructions: |
+        Revise como exemplo didatico executavel de .NET 11 e C# 15.
+        - Priorize bugs de compilacao, semantica incorreta e comportamento observavel.
+        - Verifique nulabilidade, async/await, concorrencia, cancelamento, excecoes
+          e descarte de recursos quando forem pertinentes ao conceito.
+        - Avalie limites de seguranca, vazamento de dados e uso de credenciais.
+        - Testes devem ser deterministicos e validar o comportamento ensinado.
+        - Diferencie simplificacao intencional de pratica insegura sem ressalvas.
+        - Nao exija abstracoes, infraestrutura ou resiliencia alheias ao objetivo.
+
+    - path: "exemplos/**/*.csproj"
+      instructions: |
+        Verifique target net11.0, dependencias, referencias entre projetos e
+        compatibilidade com global.json e Directory.Packages.props.
+        Aponte riscos de vulnerabilidades diretas e transitivas sem supor auditoria
+        bem-sucedida quando fontes de dados estiverem indisponiveis.
+
+    - path: "exemplos/**/*.props"
+      instructions: |
+        Revise configuracoes compartilhadas, nulabilidade, analyzers e versoes.
+        Avalie impacto transversal sobre todos os laboratorios e testes.
+
+    - path: "global.json"
+      instructions: |
+        Confira coerencia entre SDK, target frameworks, documentacao e CI.
+        Nao sugira atualizacoes sem verificar suporte e compatibilidade.
+
+    - path: "exemplos/**/*.tf"
+      instructions: |
+        Revise Terraform como laboratorio didatico.
+        Detecte secrets, IAM excessivo, recursos publicos, destruicao acidental,
+        drift e exemplos inseguros sem ressalvas explicitas.
+
+    - path: "exemplos/c20-iac/ansible/**"
+      instructions: |
+        Verifique seguranca de credenciais, idempotencia, permissao de arquivos,
+        sintaxe de playbooks e exemplos com efeitos colaterais perigosos.
+
+    - path: "scripts/**"
+      instructions: |
+        Verifique entradas nao confiaveis, erros mascarados, quoting quando cabivel,
+        comportamento deterministico, falsos positivos e falsos negativos.
+        Nao recomende suprimir falhas apenas para aprovar o pipeline.
+
+    - path: ".github/workflows/**"
+      instructions: |
+        Revise permissions minimas, secrets, pinning de actions, supply chain,
+        caches, artefatos e execucao de codigo de PRs nao confiaveis.
+        Garanta que lint, links, build, testes e auditoria NuGet mantenham gates
+        de falha coerentes com CONTRIBUTING.md e com o risco identificado.
+
+    - path: ".github/dependabot.yml"
+      instructions: |
+        Verifique ecossistemas, diretorios, frequencia, agrupamento e cobertura
+        das dependencias realmente utilizadas pelo repositorio.
+
+chat:
+  auto_reply: true
